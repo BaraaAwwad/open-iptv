@@ -15,14 +15,14 @@ struct ChannelBrowser: View {
     /// Set when showing one of My Playlists, so channels can be removed from it.
     var playlist: PlaylistRef? = nil
 
-    @State private var width: CGFloat = 900
+    @State private var fittedColumns = 4
 
     private let tileMin: CGFloat = 190
     private let spacing: CGFloat = 26
     private let hPad: CGFloat = 36
 
     private var columnCount: Int {
-        mode == .list ? 1 : max(1, Int((width - hPad * 2 + spacing) / (tileMin + spacing)))
+        mode == .list ? 1 : fittedColumns
     }
 
     var body: some View {
@@ -60,7 +60,10 @@ struct ChannelBrowser: View {
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: selection.isActive)
-        .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
+        // Store the column count, not the width, so layout only re-runs when the count really changes.
+        .onGeometryChange(for: Int.self, of: { [hPad, spacing, tileMin] in
+            max(1, Int(($0.size.width - hPad * 2 + spacing) / (tileMin + spacing)))
+        }) { fittedColumns = $0 }
         .onChange(of: columnCount, initial: true) { nav.columns = columnCount }
     }
 

@@ -61,14 +61,15 @@ private struct Shelf: View {
     let channels: [Channel]
     let target: SidebarItem
     @Binding var selection: SidebarItem?
-    @State private var leadingID: String?
-    @State private var width: CGFloat = 900
+    // Paging is driven only by the ‹ › buttons (no scroll-position binding: SwiftUI rewrites those
+    // during layout, which can spin into a layout loop and crash).
+    @State private var pageStart = 0
+    @State private var pageSize = 4
 
     private let tileWidth: CGFloat = 220
     private let spacing: CGFloat = 22
 
-    private var pageSize: Int { max(1, Int((width - 72 + spacing) / (tileWidth + spacing))) }
-    private var leadingIndex: Int { leadingID.flatMap { id in channels.firstIndex { $0.id == id } } ?? 0 }
+    private var leadingIndex: Int { min(pageStart, max(0, channels.count - 1)) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -91,6 +92,7 @@ private struct Shelf: View {
             .padding(.horizontal, 36)
 
             // The shelf spans the whole pane, so cards scroll on under the sidebar glass instead of vanishing.
+            ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: spacing) {
                     ForEach(channels.prefix(20)) { channel in
@@ -111,20 +113,23 @@ private struct Shelf: View {
                         }
                     }
                 }
-                .scrollTargetLayout()
                 .padding(.vertical, 6)
             }
             .contentMargins(.horizontal, 36, for: .scrollContent)
-            .scrollPosition(id: $leadingID, anchor: .leading)
+            .onChange(of: pageStart) { _, start in
+                guard channels.indices.contains(start) else { return }
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { proxy.scrollTo(channels[start].id, anchor: .leading) }
+            }
             // Hover lift and shadow spill outside the shelf instead of being cut off.
             .scrollClipDisabled()
+            }
         }
-        .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
+        // Only an integer page size is stored, so this fires on real changes, not every layout pass.
+        .onGeometryChange(for: Int.self, of: { max(1, Int(($0.size.width - 72 + spacing) / (tileWidth + spacing))) }) { pageSize = $0 }
     }
 
     private func page(_ direction: Int) {
-        let target = min(max(leadingIndex + direction * pageSize, 0), max(0, channels.count - pageSize))
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { leadingID = channels[target].id }
+        pageStart = min(max(leadingIndex + direction * pageSize, 0), max(0, channels.count - pageSize))
     }
 
     private func pageButton(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {

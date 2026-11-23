@@ -231,6 +231,21 @@ final class PlayerModel {
             if p && status == .playing { isBehindLive = true }
         case .failed(let msg):
             PlayerLog.write("failed: \(msg) \(channel?.id ?? "")")
+            // Right after switching, the provider often still counts the previous stream against the
+            // one-connection limit and refuses. Give it a moment and try once more before giving up.
+            if autoRetries == 0, let channel, let url = library.streamURL(channel), airPlay == .off {
+                autoRetries = 1
+                status = .loading
+                loadTask?.cancel()
+                loadTask = Task { [weak self] in
+                    try? await Task.sleep(for: .milliseconds(1500))
+                    guard let self, !Task.isCancelled, self.channel == channel else { return }
+                    PlayerLog.write("retry after refusal \(channel.id)")
+                    mpv.load(url)
+                    watchForStall(channel)
+                }
+                return
+            }
             status = .failed(msg == "loading failed" ? "This channel isn't available right now." : msg.capitalizedFirst)
         case .ended:
             // Live streams shouldn't end. Reconnect, but at most twice: a provider that keeps cutting
