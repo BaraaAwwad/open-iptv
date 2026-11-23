@@ -28,6 +28,9 @@ final class PlayerModel {
         let url: URL
         var seriesID: Int? = nil
         var start: Double? = nil
+        /// What it is, so Continue Watching can show and resume it.
+        var movie: Movie? = nil
+        var episode: Episode? = nil
     }
     /// Set while a movie or episode plays (nil for live channels).
     private(set) var vod: VODItem?
@@ -52,6 +55,10 @@ final class PlayerModel {
     var mode: Mode = .hidden
     /// Where PiP sits. Every new playback starts top-right; dragging moves it for that session.
     var pipCorner = "topTrailing"
+    /// PiP width (resizable, remembered).
+    var pipWidth: Double = UserDefaults.standard.object(forKey: "pipWidth") as? Double ?? 380 {
+        didSet { UserDefaults.standard.set(pipWidth, forKey: "pipWidth") }
+    }
     var isFull: Bool { mode == .full }
     private(set) var channel: Channel?
     private(set) var list: [Channel] = []

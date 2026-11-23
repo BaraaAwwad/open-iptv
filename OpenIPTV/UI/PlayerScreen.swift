@@ -107,7 +107,7 @@ struct PlayerScreen: View {
                     bottomBar.onHover { overControls = $0 }
                 }
                 .padding(.horizontal, 22)
-                .padding(.top, 60) // below the title bar / full-screen menu bar zone, which swallows clicks
+                .padding(.top, 40) // clear of the menu bar that slides down in full screen
                 .padding(.bottom, 22)
                 .transition(.opacity)
             }
@@ -220,9 +220,7 @@ struct PlayerScreen: View {
         HStack(alignment: .top) {
             HStack(spacing: 2) {
                 capsuleButton("xmark", help: "Stop and close") { player.close() }
-                capsuleButton("pip.exit", help: "Picture in picture (Esc)") { player.mode = .mini }
-                capsuleButton(isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                              help: "Full screen (F)") { toggleFullScreen() }
+                capsuleButton("pip.enter", help: "Picture in picture (Esc)") { player.mode = .mini }
             }
             .padding(4)
             .glassCapsule()
@@ -329,7 +327,9 @@ struct PlayerScreen: View {
 
     private var isFullScreen: Bool { NSApp.keyWindow?.styleMask.contains(.fullScreen) ?? false }
 
-    private func toggleFullScreen() { NSApp.keyWindow?.toggleFullScreen(nil) }
+    /// The full player only exists in real full screen, so leaving it means going back to PiP
+    /// (RootView takes the window out of full screen).
+    private func toggleFullScreen() { player.mode = .mini }
 
     private func showControls() {
         if !controlsVisible { controlsVisible = true }
@@ -347,7 +347,7 @@ struct PlayerScreen: View {
 
     /// Esc leaves window full screen first, then shrinks to picture in picture (playback keeps going).
     private func exit() {
-        if isFullScreen { toggleFullScreen() } else { player.mode = .mini }
+        player.mode = .mini
     }
 }
 

@@ -30,11 +30,14 @@ struct BrowserView: View {
             Sidebar(selection: $selection, expanded: $expanded)
                 .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 320)
         } detail: {
-            if item == .home && !isSearching {
+            if isSearching {
+                // Search covers everything: channels, movies and series.
+                SearchResultsView(query: query, channels: library.search(query), nav: nav)
+            } else if item == .home {
                 HomeView(selection: $selection, nav: nav)
             } else if item == .movies || item == .series {
                 // Search filters the open category here.
-                VODBrowser(kind: item == .movies ? .movies : .series, query: query)
+                VODBrowser(kind: item == .movies ? .movies : .series, query: "")
                     .id(item)
             } else if item == .playlists && !isSearching {
                 // Playlists on the left, that playlist's channels on the right, in one view.
@@ -66,7 +69,7 @@ struct BrowserView: View {
                 )
             }
         }
-        .searchable(text: $query, placement: .toolbar, prompt: "Search channels")
+        .searchable(text: $query, placement: .toolbar, prompt: "Search channels, movies, series")
         // Toolbar items are always present and only disabled where they don't apply: adding and removing
         // them on every page change made AppKit rebuild the toolbar (and re-lay out the sidebar) each time.
         .toolbar {
@@ -115,6 +118,7 @@ struct BrowserView: View {
             nav.install()
         }
         .onChange(of: "\(query)|\(item)|\(library.channels.count)|\(library.favorites.count)|\(String(describing: playlistRef))|\(String(describing: qualityFilter))|\(library.playlists.map(\.channelIDs.count))", initial: true) {
+            nav.columns = isSearching ? 1 : nav.columns
             nav.setItems(shown, focusFirst: isSearching)
         }
         .onChange(of: player.channel?.id) { _, id in

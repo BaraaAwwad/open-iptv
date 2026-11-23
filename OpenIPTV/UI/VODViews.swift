@@ -281,17 +281,19 @@ struct MovieDetailView: View {
     @Environment(PlayerModel.self) private var player
     let movie: Movie
     @State private var info: MovieInfo?
+    @State private var online: OnlineMeta?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
-                Hero(backdrop: info?.backdrop, poster: movie.poster) {
-                    Text(movie.title).font(.system(size: 36, weight: .bold)).lineLimit(2)
+                Hero(backdrop: online?.background ?? info?.backdrop, poster: movie.poster) {
+                    TitleLogo(logo: online?.logo, title: movie.title)
                     if let o = info?.originalTitle, o != movie.title {
                         Text(o).font(.title3).foregroundStyle(.secondary)
                     }
-                    Text(metaLine([info?.released.map { String($0.prefix(4)) } ?? movie.year, info?.genre, info?.duration,
-                                   movie.rating.map { String(format: "★ %.1f", $0) }]))
+                    Text(metaLine([info?.released.map { String($0.prefix(4)) } ?? movie.year ?? online?.year,
+                                   info?.genre ?? online?.genres?.joined(separator: ", "), info?.duration ?? online?.runtime,
+                                   online?.imdbRating.map { "IMDb \($0)" } ?? movie.rating.map { String(format: "★ %.1f", $0) }]))
                         .font(.callout.weight(.medium))
                         .foregroundStyle(.secondary)
                     if let v = info?.video {
@@ -305,14 +307,18 @@ struct MovieDetailView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 22) {
-                    if let plot = info?.plot {
+                    if let plot = info?.plot ?? online?.description {
                         Text(plot).font(.body).lineSpacing(3).frame(maxWidth: 760, alignment: .leading).textSelection(.enabled)
                     } else if info == nil {
                         ProgressView().controlSize(.small)
                     }
                     Facts(items: [
-                        ("Director", info?.director), ("Cast", info?.cast), ("Genre", info?.genre),
-                        ("Released", info?.released), ("Country", info?.country), ("Runtime", info?.duration),
+                        ("Director", info?.director ?? online?.director?.joined(separator: ", ")),
+                        ("Writer", online?.writer?.joined(separator: ", ")),
+                        ("Cast", info?.cast ?? online?.cast?.joined(separator: ", ")),
+                        ("Genre", info?.genre ?? online?.genres?.joined(separator: ", ")),
+                        ("Released", info?.released), ("Country", info?.country), ("Runtime", info?.duration ?? online?.runtime),
+                        ("Awards", online?.awards),
                         ("Video", info?.video?.summary.isEmpty == false ? info?.video?.summary : nil),
                         ("Audio", info?.audio), ("Bitrate", info?.bitrate), ("Format", movie.ext.uppercased()),
                     ])
@@ -324,7 +330,12 @@ struct MovieDetailView: View {
         }
         .ignoresSafeArea(edges: .top)
         .navigationTitle(movie.title)
-        .task(id: movie.id) { info = await vod.info(movie) }
+        .task(id: movie.id) {
+            info = await vod.info(movie)
+            online = await OnlineInfo.shared.movie(title: movie.title, originalTitle: info?.originalTitle,
+                                                  year: info?.released.map { String($0.prefix(4)) } ?? movie.year,
+                                                  tmdbID: info?.tmdbID)
+        }
     }
 
     @ViewBuilder private var actions: some View {
@@ -336,7 +347,7 @@ struct MovieDetailView: View {
             } else {
                 PlayPill(title: "Play", icon: "play.fill", primary: true) { play(from: nil) }
             }
-            if let t = info?.trailer, let url = URL(string: t.hasPrefix("http") ? t : "https://www.youtube.com/watch?v=\(t)") {
+            if let t = info?.trailer ?? online?.trailer, let url = URL(string: t.hasPrefix("http") ? t : "https://www.youtube.com/watch?v=\(t)") {
                 PlayPill(title: "Trailer", icon: "film", primary: false) { NSWorkspace.shared.open(url) }
             }
         }
@@ -345,7 +356,7 @@ struct MovieDetailView: View {
     private func play(from start: Double?) {
         guard let url = vod.url(movie) else { return }
         player.playVOD(.init(key: "m\(movie.id)", title: movie.title, subtitle: metaLine([movie.year, info?.genre]),
-                             artwork: movie.poster, url: url, start: start))
+                             artwork: movie.poster, url: url, start: start, movie: movie))
     }
 }
 
@@ -354,15 +365,17 @@ struct SeriesDetailView: View {
     @Environment(PlayerModel.self) private var player
     let series: Series
     @State private var info: SeriesInfo?
+    @State private var online: OnlineMeta?
     @State private var season: Int?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
-                Hero(backdrop: series.backdrop ?? info?.backdrop, poster: series.cover) {
-                    Text(series.title).font(.system(size: 36, weight: .bold)).lineLimit(2)
-                    Text(metaLine([series.year, series.genre, info.map { "\($0.seasons.count) season\($0.seasons.count == 1 ? "" : "s")" },
-                                   series.rating.map { String(format: "★ %.1f", $0) }]))
+                Hero(backdrop: online?.background ?? series.backdrop ?? info?.backdrop, poster: series.cover) {
+                    TitleLogo(logo: online?.logo, title: series.title)
+                    Text(metaLine([series.year ?? online?.year, series.genre ?? online?.genres?.joined(separator: ", "),
+                                   info.map { "\($0.seasons.count) season\($0.seasons.count == 1 ? "" : "s")" },
+                                   online?.imdbRating.map { "IMDb \($0)" } ?? series.rating.map { String(format: "★ %.1f", $0) }]))
                         .font(.callout.weight(.medium))
                         .foregroundStyle(.secondary)
                     if let next = nextUp {
@@ -372,10 +385,14 @@ struct SeriesDetailView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 22) {
-                    if let plot = series.plot {
+                    if let plot = series.plot ?? online?.description {
                         Text(plot).lineSpacing(3).frame(maxWidth: 760, alignment: .leading).textSelection(.enabled)
                     }
-                    Facts(items: [("Director", series.director), ("Cast", series.cast), ("Genre", series.genre)])
+                    Facts(items: [("Director", series.director ?? online?.director?.joined(separator: ", ")),
+                                  ("Writer", online?.writer?.joined(separator: ", ")),
+                                  ("Cast", series.cast ?? online?.cast?.joined(separator: ", ")),
+                                  ("Genre", series.genre ?? online?.genres?.joined(separator: ", ")),
+                                  ("Awards", online?.awards)])
                         .frame(maxWidth: 760, alignment: .leading)
 
                     if let info {
@@ -391,7 +408,8 @@ struct SeriesDetailView: View {
                         let current = season ?? info.seasons.first ?? 1
                         VStack(spacing: 4) {
                             ForEach(info.episodes[current] ?? []) { e in
-                                EpisodeRow(episode: e, fallback: series.cover, progress: vod.position("e\(e.id)")) { play(e, from: vod.position("e\(e.id)")) }
+                                EpisodeRow(episode: e, online: online?.episode(e.season, e.number), fallback: series.cover,
+                                           progress: vod.position("e\(e.id)")) { play(e, from: vod.position("e\(e.id)")) }
                             }
                         }
                         .padding(.horizontal, -12)
@@ -406,7 +424,9 @@ struct SeriesDetailView: View {
         .ignoresSafeArea(edges: .top)
         .navigationTitle(series.title)
         .task(id: series.id) {
+            async let o = OnlineInfo.shared.series(title: series.title, year: series.year)
             info = await vod.info(series)
+            online = await o
             if season == nil, let last = vod.lastEpisode[series.id], let info,
                let s = info.episodes.first(where: { $0.value.contains { "e\($0.id)" == last } })?.key {
                 season = s
@@ -431,22 +451,30 @@ struct SeriesDetailView: View {
     private func play(_ e: Episode, from start: Double?) {
         guard let url = vod.url(e) else { return }
         player.playVOD(.init(key: "e\(e.id)", title: series.title, subtitle: "S\(e.season) E\(e.number) · \(e.title)",
-                             artwork: series.cover, url: url, seriesID: series.id, start: start))
+                             artwork: series.cover, url: url, seriesID: series.id, start: start, episode: e))
     }
 }
 
 private struct EpisodeRow: View {
     let episode: Episode
+    var online: OnlineEpisode? = nil
     let fallback: String?
     let progress: Double?
     let action: () -> Void
     @State private var hovering = false
 
+    /// The provider's name unless it's just "Episode N", then the real one from online info.
+    private var title: String {
+        let generic = episode.title.hasPrefix("Episode ")
+        if generic, let n = online?.name, !n.isEmpty, !n.hasPrefix("Episode ") { return "\(episode.number). \(n)" }
+        return generic ? episode.title : "\(episode.number). \(episode.title)"
+    }
+
     var body: some View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 16) {
                 ZStack(alignment: .bottomLeading) {
-                    ArtworkView(url: episode.image ?? fallback, maxPixels: 500, placeholder: "E\(episode.number)")
+                    ArtworkView(url: episode.image ?? online?.thumbnail ?? fallback, maxPixels: 500, placeholder: "E\(episode.number)")
                         .frame(width: 192, height: 108)
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     if hovering {
@@ -461,10 +489,9 @@ private struct EpisodeRow: View {
                     }
                 }
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(episode.title.hasPrefix("Episode ") ? episode.title : "\(episode.number). \(episode.title)")
-                        .font(.headline).lineLimit(2)
-                    Text(metaLine([episode.duration, episode.video?.tier])).font(.caption).foregroundStyle(.secondary)
-                    if let plot = episode.plot {
+                    Text(title).font(.headline).lineLimit(2)
+                    Text(metaLine([online?.released, episode.duration, episode.video?.tier])).font(.caption).foregroundStyle(.secondary)
+                    if let plot = episode.plot ?? online?.overview {
                         Text(plot).font(.callout).foregroundStyle(.secondary).lineLimit(3)
                     }
                 }
@@ -508,5 +535,34 @@ private struct Badge: View {
             .padding(.vertical, 3)
             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.secondary, lineWidth: 1))
             .foregroundStyle(.secondary)
+    }
+}
+
+/// The show's title logo (transparent artwork) when online info has one, otherwise the title in text.
+struct TitleLogo: View {
+    let logo: String?
+    let title: String
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 380, maxHeight: 120, alignment: .leading)
+                    .shadow(color: .black.opacity(0.4), radius: 10, y: 4)
+                    .accessibilityLabel(title)
+                    .help(title)
+            } else {
+                Text(title).font(.system(size: 36, weight: .bold)).lineLimit(2)
+            }
+        }
+        .task(id: logo) {
+            image = nil
+            guard let logo else { return }
+            let img = await ImageLoader.shared.image(logo, maxPixels: 800)
+            withAnimation(.easeOut(duration: 0.25)) { image = img }
+        }
     }
 }

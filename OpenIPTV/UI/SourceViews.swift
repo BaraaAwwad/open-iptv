@@ -102,6 +102,7 @@ struct SourceForm: View {
 struct SettingsView: View {
     @Environment(Library.self) private var library
     @State private var adding = false
+    @AppStorage("onlineInfo") private var onlineInfo = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -133,9 +134,15 @@ struct SettingsView: View {
                 Spacer()
                 Button("Add Playlist…") { adding = true }
             }
+            Divider().padding(.vertical, 4)
+            Toggle("Enhance movies and series with online info", isOn: $onlineInfo)
+            Text("Adds title logos, backdrops, IMDb ratings, cast, awards and episode stills from Cinemeta (the public movie database Stremio uses). Only the title you open is looked up; no account needed.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(20)
-        .frame(width: 520, height: 340)
+        .frame(width: 520, height: 440)
         .sheet(isPresented: $adding) {
             SourceForm(onDone: { adding = false })
                 .padding(24)

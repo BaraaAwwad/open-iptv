@@ -1,9 +1,11 @@
 import SwiftUI
 
-/// Home: shelves of what you watch, then every category as a card.
+/// Home: Continue Watching, recent channels, favorites, the newest movies and series, then every
+/// channel category as a card. Movie / series pages open right here (navigation stack).
 struct HomeView: View {
     @Environment(Library.self) private var library
     @Environment(PlayerModel.self) private var player
+    @Environment(VODStore.self) private var vod
     @Binding var selection: SidebarItem?
     let nav: Navigator
 
@@ -12,44 +14,186 @@ struct HomeView: View {
     var body: some View {
         let recents = library.channels(for: .recents)
         let favorites = library.channels(for: .favorites)
-        ScrollView {
-            VStack(alignment: .leading, spacing: 34) {
-                if library.channels.isEmpty {
-                    VStack(spacing: 10) {
-                        if library.isLoading { ProgressView() }
-                        Text(library.loadError ?? "Loading channels…").foregroundStyle(.secondary)
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 34) {
+                    if library.channels.isEmpty {
+                        VStack(spacing: 10) {
+                            if library.isLoading { ProgressView() }
+                            Text(library.loadError ?? "Loading channels…").foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 300)
+                        .padding(.horizontal, 36)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 300)
-                    .padding(.horizontal, 36)
-                }
-                if !recents.isEmpty {
-                    shelf("Continue Watching", recents, .recents)
-                }
-                if !favorites.isEmpty {
-                    shelf("Favorites", favorites, .favorites)
-                }
-                if !library.groups.isEmpty {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text("Browse").font(.title2.weight(.bold))
-                        LazyVGrid(columns: cardColumns, spacing: 22) {
-                            ForEach(library.groups) { group in
-                                CategoryCard(group: group, channels: library.byGroup[group.id] ?? []) {
-                                    selection = .group(group.id)
+                    if !vod.recents.isEmpty {
+                        ContinueWatchingRow()
+                    }
+                    if !recents.isEmpty {
+                        shelf("Recent Channels", recents, .recents)
+                    }
+                    if !favorites.isEmpty {
+                        shelf("Favorites", favorites, .favorites)
+                    }
+                    let movies = vod.latestMovies()
+                    if !movies.isEmpty {
+                        PosterRow(title: "Latest Movies", target: .movies, selection: $selection) {
+                            ForEach(movies) { m in
+                                NavigationLink(value: m) {
+                                    PosterCard(title: m.title, poster: m.poster, caption: m.year ?? "").frame(width: 150)
                                 }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
-                    .padding(.horizontal, 36)
+                    let series = vod.latestSeries()
+                    if !series.isEmpty {
+                        PosterRow(title: "Latest Series", target: .series, selection: $selection) {
+                            ForEach(series) { s in
+                                NavigationLink(value: s) {
+                                    PosterCard(title: s.title, poster: s.cover, caption: s.year ?? "").frame(width: 150)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    if !library.groups.isEmpty {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("Browse Channels").font(.title2.weight(.bold))
+                            LazyVGrid(columns: cardColumns, spacing: 22) {
+                                ForEach(library.groups) { group in
+                                    CategoryCard(group: group, channels: library.byGroup[group.id] ?? []) {
+                                        selection = .group(group.id)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 36)
+                    }
                 }
+                .padding(.top, 22)
+                .padding(.bottom, 40)
             }
-            .padding(.top, 22)
-            .padding(.bottom, 40)
+            .navigationDestination(for: Movie.self) { MovieDetailView(movie: $0) }
+            .navigationDestination(for: Series.self) { SeriesDetailView(series: $0) }
         }
         .onAppear { nav.setItems([], focusFirst: false) }
     }
 
     private func shelf(_ title: String, _ channels: [Channel], _ target: SidebarItem) -> some View {
         Shelf(title: title, channels: Array(channels.prefix(20)), target: target, selection: $selection)
+    }
+}
+
+/// A titled horizontal row of posters.
+struct PosterRow<Content: View>: View {
+    let title: String
+    let target: SidebarItem?
+    @Binding var selection: SidebarItem?
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button { if let target { selection = target } } label: {
+                HStack(spacing: 4) {
+                    Text(title).font(.title2.weight(.bold))
+                    if target != nil {
+                        Image(systemName: "chevron.right").font(.title3.weight(.bold)).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 36)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 20) { content() }
+                    .padding(.vertical, 6)
+            }
+            .contentMargins(.horizontal, 36, for: .scrollContent)
+            .scrollClipDisabled()
+        }
+    }
+}
+
+/// Movies and episodes you're partway through: wide cards with a progress bar, click to resume.
+struct ContinueWatchingRow: View {
+    @Environment(VODStore.self) private var vod
+    @Environment(PlayerModel.self) private var player
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Continue Watching").font(.title2.weight(.bold)).padding(.horizontal, 36)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 22) {
+                    ForEach(vod.recents) { r in
+                        ContinueCard(recent: r) {
+                            if let item = vod.item(for: r) { player.playVOD(item) }
+                        }
+                        .contextMenu {
+                            Button("Resume") { if let item = vod.item(for: r) { player.playVOD(item) } }
+                            Button("Remove from Continue Watching", role: .destructive) {
+                                withAnimation(.easeOut(duration: 0.2)) { vod.removeRecent(r) }
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 6)
+            }
+            .contentMargins(.horizontal, 36, for: .scrollContent)
+            .scrollClipDisabled()
+        }
+    }
+}
+
+private struct ContinueCard: View {
+    let recent: VODRecent
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 9) {
+                ZStack(alignment: .bottom) {
+                    ArtworkView(url: recent.episode?.image ?? recent.artwork, maxPixels: 640, placeholder: recent.title)
+                    LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .center, endPoint: .bottom)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Spacer()
+                        HStack {
+                            Image(systemName: "play.fill").font(.caption)
+                            Text(recent.remaining).font(.caption.weight(.semibold))
+                            Spacer()
+                        }
+                        .foregroundStyle(.white)
+                        GeometryReader { geo in
+                            Capsule().fill(.white.opacity(0.3))
+                                .overlay(alignment: .leading) {
+                                    Capsule().fill(.white)
+                                        .frame(width: geo.size.width * min(1, recent.position / max(recent.duration, 1)))
+                                }
+                        }
+                        .frame(height: 4)
+                    }
+                    .padding(12)
+                }
+                .frame(width: 280, height: 158)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(.white.opacity(hovering ? 0.5 : 0.08), lineWidth: hovering ? 1.5 : 1)
+                }
+                .shadow(color: .black.opacity(hovering ? 0.45 : 0.15), radius: hovering ? 20 : 5, y: hovering ? 12 : 3)
+                .scaleEffect(hovering ? 1.04 : 1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(recent.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    if let sub = recent.subtitle {
+                        Text(sub).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                .frame(width: 280, alignment: .leading)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.spring(response: 0.28, dampingFraction: 0.72), value: hovering)
     }
 }
 

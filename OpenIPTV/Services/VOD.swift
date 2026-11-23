@@ -16,6 +16,8 @@ struct Movie: Identifiable, Hashable, Codable {
     let rating: Double?
     let ext: String
     let categoryID: String
+    /// When the provider added it (for "Latest Movies").
+    var added: Double? = nil
 }
 
 struct MovieInfo {
@@ -33,10 +35,11 @@ struct MovieInfo {
     var video: VideoDetails?
     var audio: String?
     var bitrate: String?
+    var tmdbID: Int?
 }
 
 /// What the file really is, from the provider's own probe: "3840×2160 · HEVC · HDR".
-struct VideoDetails: Hashable {
+struct VideoDetails: Hashable, Codable {
     var width: Int?
     var height: Int?
     var codec: String?
@@ -71,9 +74,10 @@ struct Series: Identifiable, Hashable, Codable {
     let backdrop: String?
     let trailer: String?
     let categoryID: String
+    var added: Double? = nil
 }
 
-struct Episode: Identifiable, Hashable {
+struct Episode: Identifiable, Hashable, Codable {
     let id: String
     let season: Int
     let number: Int
@@ -92,6 +96,25 @@ struct SeriesInfo {
     var backdrop: String?
 }
 
+/// A movie or series you're partway through (Home → Continue Watching).
+struct VODRecent: Codable, Identifiable, Hashable {
+    var id: String              // "m<movie id>" or "s<series id>"
+    var title: String
+    var subtitle: String?
+    var artwork: String?
+    var movie: Movie?
+    var episode: Episode?
+    var seriesID: Int?
+    var position: Double
+    var duration: Double
+    var updated: Date
+
+    var remaining: String {
+        let m = max(0, Int((duration - position) / 60))
+        return m >= 60 ? "\(m / 60) h \(m % 60) min left" : "\(m) min left"
+    }
+}
+
 // MARK: - Provider calls
 
 extension XtreamClient {
@@ -106,14 +129,16 @@ extension XtreamClient {
         }
     }
 
-    func movies(in category: String) async throws -> [Movie] {
-        let list = (try await json("get_vod_streams", [.init(name: "category_id", value: category)]) as? [[String: Any]]) ?? []
+    /// One category, or everything when `category` is nil (the search / Home index).
+    func movies(in category: String?) async throws -> [Movie] {
+        let list = (try await json("get_vod_streams", category.map { [.init(name: "category_id", value: $0)] } ?? []) as? [[String: Any]]) ?? []
         return list.compactMap { m in
             guard let id = Self.int(m["stream_id"]), let raw = m["name"] as? String, !Channel.isSeparator(raw) else { return nil }
             let (title, year) = VOD.split(raw)
             return Movie(id: id, title: title, year: year, poster: VOD.url(m["stream_icon"]),
                          rating: Self.double(m["rating"]).flatMap { $0 > 0 ? $0 : nil },
-                         ext: (m["container_extension"] as? String) ?? "mp4", categoryID: category)
+                         ext: (m["container_extension"] as? String) ?? "mp4",
+                         categoryID: category ?? Self.string(m["category_id"]) ?? "", added: Self.double(m["added"]))
         }
     }
 
@@ -134,12 +159,13 @@ extension XtreamClient {
             trailer: VOD.text(i["youtube_trailer"]),
             video: VOD.video(i["video"]),
             audio: VOD.audio(i["audio"]),
-            bitrate: Self.double(i["bitrate"]).map { $0 >= 1000 ? String(format: "%.1f Mbps", $0 / 1000) : String(format: "%.0f kbps", $0) }
+            bitrate: Self.double(i["bitrate"]).map { $0 >= 1000 ? String(format: "%.1f Mbps", $0 / 1000) : String(format: "%.0f kbps", $0) },
+            tmdbID: Self.int(i["tmdb_id"])
         )
     }
 
-    func series(in category: String) async throws -> [Series] {
-        let list = (try await json("get_series", [.init(name: "category_id", value: category)]) as? [[String: Any]]) ?? []
+    func series(in category: String?) async throws -> [Series] {
+        let list = (try await json("get_series", category.map { [.init(name: "category_id", value: $0)] } ?? []) as? [[String: Any]]) ?? []
         return list.compactMap { s in
             guard let id = Self.int(s["series_id"]), let raw = s["name"] as? String, !Channel.isSeparator(raw) else { return nil }
             let (title, year) = VOD.split(raw)
@@ -147,7 +173,8 @@ extension XtreamClient {
                           cover: VOD.url(s["cover"]), plot: VOD.text(s["plot"]), cast: VOD.list(s["cast"]),
                           director: VOD.list(s["director"]), genre: VOD.list(s["genre"]),
                           rating: Self.double(s["rating"]).flatMap { $0 > 0 ? $0 : nil },
-                          backdrop: VOD.url(s["backdrop_path"]), trailer: VOD.text(s["youtube_trailer"]), categoryID: category)
+                          backdrop: VOD.url(s["backdrop_path"]), trailer: VOD.text(s["youtube_trailer"]),
+                          categoryID: category ?? Self.string(s["category_id"]) ?? "", added: Self.double(s["last_modified"]))
         }
     }
 
@@ -284,6 +311,8 @@ final class VODStore {
     private(set) var progress: [String: Double] = [:]
     /// Last episode watched per series.
     private(set) var lastEpisode: [Int: String] = [:]
+    /// Continue Watching, newest first.
+    private(set) var recents: [VODRecent] = []
 
     init(library: Library) { self.library = library }
 
@@ -300,10 +329,13 @@ final class VODStore {
         sourceID = library.activeID
         movieCategories = []; seriesCategories = []; movies = [:]; series = [:]
         movieInfo = [:]; seriesInfo = [:]; error = nil
+        allMovies = []; allSeries = []; movieKeys = []; seriesKeys = []
         let key = sourceID?.uuidString ?? "-"
         progress = UserDefaults.standard.dictionary(forKey: "vod-progress-\(key)") as? [String: Double] ?? [:]
         lastEpisode = (UserDefaults.standard.dictionary(forKey: "vod-last-episode-\(key)") as? [String: String] ?? [:])
             .reduce(into: [:]) { r, kv in if let k = Int(kv.key) { r[k] = kv.value } }
+        recents = UserDefaults.standard.data(forKey: "vod-recents-\(key)")
+            .flatMap { try? JSONDecoder().decode([VODRecent].self, from: $0) } ?? []
     }
 
     func loadCategories() async {
@@ -395,13 +427,124 @@ final class VODStore {
 
     func save(_ key: String, position: Double, duration: Double, series: Int? = nil) {
         // Within the last 5% (or 3 minutes) counts as finished.
-        if duration > 0, position > duration * 0.95 || duration - position < 180 { progress[key] = nil }
-        else if position > 30 { progress[key] = position }
+        let finished = duration > 0 && (position > duration * 0.95 || duration - position < 180)
+        if finished { progress[key] = nil } else if position > 30 { progress[key] = position }
         if let series {
             lastEpisode[series] = key
             UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: lastEpisode.map { ("\($0.key)", $0.value) }),
                                       forKey: "vod-last-episode-\(sourceID?.uuidString ?? "-")")
         }
         UserDefaults.standard.set(progress, forKey: "vod-progress-\(sourceID?.uuidString ?? "-")")
+    }
+
+    /// Called by the player every few seconds and on close: resume position plus Continue Watching.
+    func save(_ item: PlayerModel.VODItem, position: Double, duration: Double) {
+        save(item.key, position: position, duration: duration, series: item.seriesID)
+        let finished = duration > 0 && (position > duration * 0.95 || duration - position < 180)
+        let id = item.seriesID.map { "s\($0)" } ?? item.key
+        recents.removeAll { $0.id == id }
+        if !finished && position > 30 {
+            recents.insert(VODRecent(id: id, title: item.title, subtitle: item.subtitle, artwork: item.artwork,
+                                     movie: item.movie, episode: item.episode, seriesID: item.seriesID,
+                                     position: position, duration: duration, updated: Date()), at: 0)
+            if recents.count > 30 { recents.removeLast(recents.count - 30) }
+        }
+        saveRecents()
+    }
+
+    func removeRecent(_ r: VODRecent) {
+        recents.removeAll { $0.id == r.id }
+        if let m = r.movie { progress["m\(m.id)"] = nil }
+        if let e = r.episode { progress["e\(e.id)"] = nil }
+        UserDefaults.standard.set(progress, forKey: "vod-progress-\(sourceID?.uuidString ?? "-")")
+        saveRecents()
+    }
+
+    private func saveRecents() {
+        if let data = try? JSONEncoder().encode(recents) {
+            UserDefaults.standard.set(data, forKey: "vod-recents-\(sourceID?.uuidString ?? "-")")
+        }
+    }
+
+    /// The player item to resume a Continue Watching entry.
+    func item(for r: VODRecent) -> PlayerModel.VODItem? {
+        if let m = r.movie, let url = url(m) {
+            return .init(key: "m\(m.id)", title: r.title, subtitle: r.subtitle, artwork: r.artwork, url: url,
+                         start: r.position, movie: m)
+        }
+        if let e = r.episode, let url = url(e) {
+            return .init(key: "e\(e.id)", title: r.title, subtitle: r.subtitle, artwork: r.artwork, url: url,
+                         seriesID: r.seriesID, start: r.position, episode: e)
+        }
+        return nil
+    }
+
+    // MARK: Full index (search + Home)
+
+    /// Every movie and series of the provider, for search and the Latest rows. Downloaded once in the
+    /// background, cached on disk, refreshed daily.
+    private(set) var allMovies: [Movie] = []
+    private(set) var allSeries: [Series] = []
+    private(set) var indexing = false
+    @ObservationIgnored private var movieKeys: [String] = []
+    @ObservationIgnored private var seriesKeys: [String] = []
+
+    func loadIndex() async {
+        syncSource()
+        guard isAvailable, allMovies.isEmpty, !indexing else { return }
+        Task { await loadCategories() } // names for result captions (e.g. "FR · HBO")
+        indexing = true
+        defer { indexing = false }
+        var stale = true
+        if let (m, fresh) = cached("all-movies", as: [Movie].self), let (sr, _) = cached("all-series", as: [Series].self) {
+            await applyIndex(m, sr)
+            stale = !fresh
+        }
+        guard stale, let client else { return }
+        do {
+            async let m = client.movies(in: nil)
+            async let sr = client.series(in: nil)
+            let (movies, series) = try await (m, sr)
+            await applyIndex(movies, series)
+            store(movies, "all-movies")
+            store(series, "all-series")
+        } catch {}
+    }
+
+    private func applyIndex(_ m: [Movie], _ sr: [Series]) async {
+        let (mk, sk) = await Task.detached { (m.map { Library.fold($0.title) }, sr.map { Library.fold($0.title) }) }.value
+        allMovies = m; movieKeys = mk
+        allSeries = sr; seriesKeys = sk
+    }
+
+    func searchMovies(_ query: String, limit: Int = 120) -> [Movie] { search(query, allMovies, movieKeys, limit) }
+    func searchSeries(_ query: String, limit: Int = 120) -> [Series] { search(query, allSeries, seriesKeys, limit) }
+
+    /// Every word must match; titles starting with the query come first.
+    private func search<T>(_ query: String, _ items: [T], _ keys: [String], _ limit: Int) -> [T] {
+        let words = Library.fold(query).split(separator: " ").map(String.init)
+        guard let first = words.first else { return [] }
+        var starts: [T] = [], others: [T] = []
+        for (i, key) in keys.enumerated() where words.allSatisfy({ key.contains($0) }) {
+            if key.hasPrefix(first) { starts.append(items[i]) } else { others.append(items[i]) }
+            if starts.count >= limit { break }
+        }
+        return Array((starts + others).prefix(limit))
+    }
+
+    /// "FR · HBO": tells apart the same title the provider lists once per language.
+    func categoryLabel(movie m: Movie) -> String? {
+        movieCategories.first { $0.id == m.categoryID }.map { VODBrowser.label($0.name) }
+    }
+    func categoryLabel(series s: Series) -> String? {
+        seriesCategories.first { $0.id == s.categoryID }.map { VODBrowser.label($0.name) }
+    }
+
+    func latestMovies(_ n: Int = 20) -> [Movie] {
+        Array(allMovies.filter { $0.poster != nil }.sorted { ($0.added ?? 0) > ($1.added ?? 0) }.prefix(n))
+    }
+
+    func latestSeries(_ n: Int = 20) -> [Series] {
+        Array(allSeries.filter { $0.cover != nil }.sorted { ($0.added ?? 0) > ($1.added ?? 0) }.prefix(n))
     }
 }

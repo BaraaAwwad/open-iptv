@@ -24,7 +24,7 @@ struct OpenIPTVApp: App {
         _scanner = State(initialValue: scanner)
         let vod = VODStore(library: library)
         player.saveVODProgress = { item, position, duration in
-            vod.save(item.key, position: position, duration: duration, series: item.seriesID)
+            vod.save(item, position: position, duration: duration)
         }
         _vod = State(initialValue: vod)
     }
@@ -81,6 +81,13 @@ struct OpenIPTVApp: App {
 struct RootView: View {
     @Environment(Library.self) private var library
     @Environment(PlayerModel.self) private var player
+    @Environment(VODStore.self) private var vod
+    /// True when full screen was entered for the player (so leaving the player also leaves full screen).
+    @State private var fullScreenForPlayer = false
+
+    static var mainWindow: NSWindow? {
+        NSApp.windows.first { $0.identifier?.rawValue.contains("main") == true || $0.title == "Open IPTV" }
+    }
 
     var body: some View {
         ZStack {
@@ -108,10 +115,29 @@ struct RootView: View {
         // Full-screen playback hides the window toolbar here, at the window's root, so the split view
         // and its sidebar never see a modifier change (toggling it inside the split view rebuilt them).
         .toolbarVisibility(player.isFull ? .hidden : .automatic, for: .windowToolbar)
+        // The big player is real macOS full screen, never a window-filling mode: expanding enters
+        // full screen, and leaving full screen (Esc, green button, Mission Control) drops back to PiP.
+        .onChange(of: player.mode) { old, new in
+            guard let window = Self.mainWindow else { return }
+            let isFull = window.styleMask.contains(.fullScreen)
+            if new == .full, !isFull {
+                fullScreenForPlayer = true
+                window.toggleFullScreen(nil)
+            } else if old == .full, new != .full, isFull, fullScreenForPlayer {
+                fullScreenForPlayer = false
+                window.toggleFullScreen(nil)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
+            fullScreenForPlayer = false
+            if player.mode == .full { player.mode = .mini }
+        }
         .sheet(item: Binding(get: { library.newPlaylistRequest }, set: { library.newPlaylistRequest = $0 })) { request in
             PlaylistNameSheet(request: request)
         }
         .task { await library.load() }
+        // The movie / series index for search and Home, per provider, in the background.
+        .task(id: library.activeID) { await vod.loadIndex() }
     }
 }
 
