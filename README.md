@@ -46,6 +46,12 @@ xcodegen generate
 open OpenIPTV.xcodeproj
 ```
 
+Or build an optimized copy into /Applications:
+
+```bash
+scripts/install.sh
+```
+
 Or from the command line:
 
 ```bash

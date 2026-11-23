@@ -20,7 +20,7 @@ struct Movie: Identifiable, Hashable, Codable {
     var added: Double? = nil
 }
 
-struct MovieInfo {
+struct MovieInfo: Codable {
     var originalTitle: String?
     var plot: String?
     var cast: String?
@@ -36,6 +36,7 @@ struct MovieInfo {
     var audio: String?
     var bitrate: String?
     var tmdbID: Int?
+    var language: String?
 }
 
 /// What the file really is, from the provider's own probe: "3840×2160 · HEVC · HDR".
@@ -87,9 +88,10 @@ struct Episode: Identifiable, Hashable, Codable {
     let duration: String?
     let image: String?
     let video: VideoDetails?
+    var language: String? = nil
 }
 
-struct SeriesInfo {
+struct SeriesInfo: Codable {
     var seasons: [Int]
     var seasonNames: [Int: String]
     var episodes: [Int: [Episode]]
@@ -160,7 +162,8 @@ extension XtreamClient {
             video: VOD.video(i["video"]),
             audio: VOD.audio(i["audio"]),
             bitrate: Self.double(i["bitrate"]).map { $0 >= 1000 ? String(format: "%.1f Mbps", $0 / 1000) : String(format: "%.0f kbps", $0) },
-            tmdbID: Self.int(i["tmdb_id"])
+            tmdbID: Self.int(i["tmdb_id"]),
+            language: VOD.language(i["audio"])
         )
     }
 
@@ -193,7 +196,8 @@ extension XtreamClient {
                     title: VOD.episodeTitle(e["title"] as? String ?? "", number: Self.int(e["episode_num"]) ?? 0),
                     ext: (e["container_extension"] as? String) ?? "mp4",
                     plot: VOD.text(info["plot"]), duration: VOD.text(info["duration"]),
-                    image: VOD.url(info["movie_image"]), video: VOD.video(info["video"])))
+                    image: VOD.url(info["movie_image"]), video: VOD.video(info["video"]),
+                    language: VOD.language(info["audio"])))
             }
         }
         for k in episodes.keys { episodes[k]?.sort { $0.number < $1.number } }
@@ -281,6 +285,16 @@ enum VOD {
                             hdr: transfer.contains("2084") || transfer.contains("hlg"))
     }
 
+    /// Audio track language from the provider's probe ("eng" → "EN").
+    static func language(_ v: Any?) -> String? {
+        guard let d = dict(v), let tags = d["tags"] as? [String: Any], let lang = (tags["language"] as? String)?.lowercased(),
+              lang != "und", !lang.isEmpty else { return nil }
+        let map = ["eng": "EN", "fre": "FR", "fra": "FR", "ara": "AR", "spa": "ES", "ger": "DE", "deu": "DE", "ita": "IT",
+                   "por": "PT", "tur": "TR", "rus": "RU", "dut": "NL", "nld": "NL", "pol": "PL", "hin": "HI", "jpn": "JA",
+                   "kor": "KO", "chi": "ZH", "zho": "ZH", "per": "FA", "fas": "FA", "heb": "HE", "swe": "SV", "gre": "EL", "ell": "EL"]
+        return map[lang] ?? lang.uppercased()
+    }
+
     static func audio(_ v: Any?) -> String? {
         guard let d = dict(v) else { return nil }
         let codec = (d["codec_name"] as? String)?.uppercased()
@@ -334,6 +348,8 @@ final class VODStore {
         progress = UserDefaults.standard.dictionary(forKey: "vod-progress-\(key)") as? [String: Double] ?? [:]
         lastEpisode = (UserDefaults.standard.dictionary(forKey: "vod-last-episode-\(key)") as? [String: String] ?? [:])
             .reduce(into: [:]) { r, kv in if let k = Int(kv.key) { r[k] = kv.value } }
+        quick = cached("quick", as: [String: Quick].self)?.0 ?? [:]
+        queue = []; queued = []
         recents = UserDefaults.standard.data(forKey: "vod-recents-\(key)")
             .flatMap { try? JSONDecoder().decode([VODRecent].self, from: $0) } ?? []
     }
@@ -360,6 +376,14 @@ final class VODStore {
             .appendingPathComponent("Open IPTV/vod-\(id.uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent(name + ".json")
+    }
+
+    private func cached<T: Decodable>(_ name: String, as type: T.Type, maxAge: TimeInterval) -> (T, fresh: Bool)? {
+        guard let hit = cached(name, as: type) else { return nil }
+        guard let url = cacheURL(name),
+              let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+              Date().timeIntervalSince(date) < maxAge else { return nil }
+        return hit
     }
 
     private func cached<T: Decodable>(_ name: String, as: T.Type) -> (T, fresh: Bool)? {
@@ -404,18 +428,104 @@ final class VODStore {
         } catch { if series[category] == nil { self.error = error.localizedDescription } }
     }
 
+    // Details are saved on disk: this provider takes 10+ seconds per series, so a second visit is instant.
     func info(_ m: Movie) async -> MovieInfo? {
         if let i = movieInfo[m.id] { return i }
+        if let (i, _) = cached("mi-\(m.id)", as: MovieInfo.self, maxAge: 7 * 86400) {
+            movieInfo[m.id] = i; noteQuick(m, i); return i
+        }
         guard let client, let i = try? await client.movieInfo(m.id) else { return nil }
         movieInfo[m.id] = i
+        store(i, "mi-\(m.id)")
+        noteQuick(m, i)
         return i
     }
 
     func info(_ s: Series) async -> SeriesInfo? {
         if let i = seriesInfo[s.id] { return i }
+        if let (i, _) = cached("si-\(s.id)", as: SeriesInfo.self, maxAge: 3 * 86400) {
+            seriesInfo[s.id] = i; noteQuick(s, i); return i
+        }
         guard let client, let i = try? await client.seriesInfo(s.id) else { return nil }
         seriesInfo[s.id] = i
+        store(i, "si-\(s.id)")
+        noteQuick(s, i)
         return i
+    }
+
+    // MARK: Badges (quality, language, seasons) for posters
+
+    /// What makes one copy of a title different from another: quality, audio language, seasons.
+    struct Quick: Codable, Hashable {
+        var tier: String?
+        var hdr = false
+        var language: String?
+        var seasons: Int?
+        var episodes: Int?
+
+        var badges: [String] { [tier, hdr ? "HDR" : nil, language].compactMap { $0 } }
+        var counts: String? {
+            guard let seasons else { return nil }
+            let s = "\(seasons) season\(seasons == 1 ? "" : "s")"
+            return episodes.map { "\(s) · \($0) ep" } ?? s
+        }
+    }
+
+    private(set) var quick: [String: Quick] = [:]
+    @ObservationIgnored private var queue: [(key: String, job: () async -> Void)] = []
+    @ObservationIgnored private var queued = Set<String>()
+    @ObservationIgnored private var running = 0
+    @ObservationIgnored private var quickSave: Task<Void, Never>?
+
+    func quick(_ m: Movie) -> Quick? { quick["m\(m.id)"] }
+    func quick(_ s: Series) -> Quick? { quick["s\(s.id)"] }
+
+    /// Fetch details for a poster that just came on screen (four at a time, newest first).
+    func enrich(_ m: Movie) { enqueue("m\(m.id)") { [weak self] in _ = await self?.info(m) } }
+    func enrich(_ s: Series) { enqueue("s\(s.id)") { [weak self] in _ = await self?.info(s) } }
+
+    private func enqueue(_ key: String, _ job: @escaping () async -> Void) {
+        guard client != nil, quick[key] == nil, !queued.contains(key) else { return }
+        queued.insert(key)
+        queue.append((key, job))
+        if queue.count > 40 { queued.remove(queue.removeFirst().key) } // scrolled past: skip
+        pump()
+    }
+
+    private func pump() {
+        while running < 4, let next = queue.popLast() {
+            running += 1
+            Task { [weak self] in
+                await next.job()
+                guard let self else { return }
+                running -= 1
+                queued.remove(next.key)
+                pump()
+            }
+        }
+    }
+
+    private func noteQuick(_ m: Movie, _ i: MovieInfo) {
+        setQuick("m\(m.id)", Quick(tier: i.video?.tier, hdr: i.video?.hdr ?? false, language: i.language))
+    }
+
+    private func noteQuick(_ s: Series, _ i: SeriesInfo) {
+        let eps = i.seasons.flatMap { i.episodes[$0] ?? [] }
+        let video = eps.first { $0.video?.height != nil }?.video
+        setQuick("s\(s.id)", Quick(tier: video?.tier, hdr: video?.hdr ?? false,
+                                    language: eps.first { $0.language != nil }?.language,
+                                    seasons: i.seasons.count, episodes: eps.count))
+    }
+
+    private func setQuick(_ key: String, _ q: Quick) {
+        guard quick[key] != q else { return }
+        quick[key] = q
+        quickSave?.cancel()
+        quickSave = Task { [quick] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self.store(quick, "quick")
+        }
     }
 
     func url(_ m: Movie) -> URL? { client?.movieURL(m) }
@@ -512,9 +622,14 @@ final class VODStore {
     }
 
     private func applyIndex(_ m: [Movie], _ sr: [Series]) async {
-        let (mk, sk) = await Task.detached { (m.map { Library.fold($0.title) }, sr.map { Library.fold($0.title) }) }.value
+        let (mk, sk) = await Task.detached { (m.map { VODStore.key($0.title) }, sr.map { VODStore.key($0.title) }) }.value
         allMovies = m; movieKeys = mk
         allSeries = sr; seriesKeys = sk
+    }
+
+    /// Cheap search key (Foundation folding): fast enough for 180k titles.
+    nonisolated static func key(_ s: String) -> String {
+        s.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
     }
 
     func searchMovies(_ query: String, limit: Int = 120) -> [Movie] { search(query, allMovies, movieKeys, limit) }
@@ -522,7 +637,7 @@ final class VODStore {
 
     /// Every word must match; titles starting with the query come first.
     private func search<T>(_ query: String, _ items: [T], _ keys: [String], _ limit: Int) -> [T] {
-        let words = Library.fold(query).split(separator: " ").map(String.init)
+        let words = VODStore.key(query).split(whereSeparator: \.isWhitespace).map(String.init)
         guard let first = words.first else { return [] }
         var starts: [T] = [], others: [T] = []
         for (i, key) in keys.enumerated() where words.allSatisfy({ key.contains($0) }) {

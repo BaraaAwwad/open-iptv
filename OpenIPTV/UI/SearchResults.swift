@@ -50,9 +50,10 @@ struct SearchResultsView: View {
                             LazyVGrid(columns: posterColumns, spacing: 26) {
                                 ForEach(movies) { m in
                                     NavigationLink(value: m) {
-                                        PosterCard(title: m.title, poster: m.poster,
-                                                   caption: [m.year, vod.categoryLabel(movie: m)].compactMap { $0 }.joined(separator: " · "))
+                                        PosterCard(title: m.title, poster: m.poster, caption: m.year ?? "",
+                                                   badges: vod.quick(m)?.badges ?? [], detail: vod.categoryLabel(movie: m))
                                     }
+                                    .task { vod.enrich(m) }
                                     .buttonStyle(.plain)
                                 }
                             }
@@ -65,8 +66,10 @@ struct SearchResultsView: View {
                                 ForEach(series) { s in
                                     NavigationLink(value: s) {
                                         PosterCard(title: s.title, poster: s.cover,
-                                                   caption: [s.year, vod.categoryLabel(series: s)].compactMap { $0 }.joined(separator: " · "))
+                                                   caption: [s.year, vod.quick(s)?.counts].compactMap { $0 }.joined(separator: " · "),
+                                                   badges: vod.quick(s)?.badges ?? [], detail: vod.categoryLabel(series: s))
                                     }
+                                    .task { vod.enrich(s) }
                                     .buttonStyle(.plain)
                                 }
                             }

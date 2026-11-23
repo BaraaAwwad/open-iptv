@@ -55,16 +55,20 @@ struct VODBrowser: View {
                 if let items = vod.movies[category] {
                     PosterGrid(title: name, items: filter(items, \.title), key: category) { m in
                         NavigationLink(value: m) {
-                            PosterCard(title: m.title, poster: m.poster, caption: caption(m.year, m.rating))
+                            PosterCard(title: m.title, poster: m.poster, caption: caption(m.year, m.rating),
+                                       badges: vod.quick(m)?.badges ?? [])
                         }
+                        .task { vod.enrich(m) }
                     }
                 } else { loadingView }
             case .series:
                 if let items = vod.series[category] {
                     PosterGrid(title: name, items: filter(items, \.title), key: category) { s in
                         NavigationLink(value: s) {
-                            PosterCard(title: s.title, poster: s.cover, caption: caption(s.year, s.rating))
+                            PosterCard(title: s.title, poster: s.cover, caption: caption(s.year, s.rating),
+                                       badges: vod.quick(s)?.badges ?? [], detail: vod.quick(s)?.counts)
                         }
+                        .task { vod.enrich(s) }
                     }
                 } else { loadingView }
             }
@@ -142,6 +146,10 @@ struct PosterCard: View {
     let title: String
     let poster: String?
     let caption: String
+    /// Quality / language chips over the poster ("1080p", "HDR", "EN").
+    var badges: [String] = []
+    /// Second caption line, e.g. the collection: "FR · HBO".
+    var detail: String? = nil
     @State private var hovering = false
 
     var body: some View {
@@ -153,6 +161,22 @@ struct PosterCard: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .strokeBorder(.white.opacity(hovering ? 0.5 : 0.08), lineWidth: hovering ? 1.5 : 1)
                 }
+                .overlay(alignment: .topLeading) {
+                    if !badges.isEmpty {
+                        HStack(spacing: 4) {
+                            ForEach(badges, id: \.self) { b in
+                                Text(b)
+                                    .font(.system(size: 9, weight: .heavy))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 3)
+                                    .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            }
+                        }
+                        .padding(7)
+                        .transition(.opacity)
+                    }
+                }
                 .shadow(color: .black.opacity(hovering ? 0.45 : 0.15), radius: hovering ? 20 : 5, y: hovering ? 12 : 3)
                 .scaleEffect(hovering ? 1.05 : 1)
             Text(title)
@@ -161,6 +185,9 @@ struct PosterCard: View {
                 .foregroundStyle(hovering ? .primary : .secondary)
             if !caption.isEmpty {
                 Text(caption).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
+            }
+            if let detail, !detail.isEmpty {
+                Text(detail).font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
             }
         }
         .contentShape(Rectangle())

@@ -39,8 +39,11 @@ struct HomeView: View {
                         PosterRow(title: "Latest Movies", target: .movies, selection: $selection) {
                             ForEach(movies) { m in
                                 NavigationLink(value: m) {
-                                    PosterCard(title: m.title, poster: m.poster, caption: m.year ?? "").frame(width: 150)
+                                    PosterCard(title: m.title, poster: m.poster, caption: m.year ?? "",
+                                               badges: vod.quick(m)?.badges ?? [], detail: vod.categoryLabel(movie: m))
+                                        .frame(width: 150)
                                 }
+                                .task { vod.enrich(m) }
                                 .buttonStyle(.plain)
                             }
                         }
@@ -50,8 +53,11 @@ struct HomeView: View {
                         PosterRow(title: "Latest Series", target: .series, selection: $selection) {
                             ForEach(series) { s in
                                 NavigationLink(value: s) {
-                                    PosterCard(title: s.title, poster: s.cover, caption: s.year ?? "").frame(width: 150)
+                                    PosterCard(title: s.title, poster: s.cover, caption: s.year ?? "",
+                                               badges: vod.quick(s)?.badges ?? [], detail: vod.categoryLabel(series: s))
+                                        .frame(width: 150)
                                 }
+                                .task { vod.enrich(s) }
                                 .buttonStyle(.plain)
                             }
                         }
