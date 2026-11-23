@@ -8,38 +8,28 @@ struct VODBrowser: View {
     @Environment(VODStore.self) private var vod
     let kind: Kind
     let query: String
+    /// From the toolbar's filter button: one language's collections ("" = all).
+    let language: String
+    /// From the toolbar's filter button: only titles measured at this quality.
+    let quality: String?
     @State private var category: String?
     @State private var path = NavigationPath()
-    /// Language filter: narrows the category list to one language's collections. Remembered.
-    @AppStorage("vodLanguage") private var language = ""
-    /// Quality filter: only titles measured at this quality.
-    @State private var quality: String?
 
     private var allCategories: [VODCategory] { kind == .movies ? vod.movieCategories : vod.seriesCategories }
     private var categories: [VODCategory] {
         language.isEmpty ? allCategories : allCategories.filter { VODBrowser.languageTag($0.name) == language }
     }
 
-    /// Languages present in the category names, most common first.
-    private var languages: [(tag: String, count: Int)] {
+    /// Languages present in category names, most common first (for the toolbar filter).
+    static func languages(_ categories: [VODCategory]) -> [(tag: String, count: Int)] {
         var counts: [String: Int] = [:]
-        for c in allCategories { if let t = VODBrowser.languageTag(c.name) { counts[t, default: 0] += 1 } }
+        for c in categories { if let t = languageTag(c.name) { counts[t, default: 0] += 1 } }
         return counts.map { ($0.key, $0.value) }.sorted { $0.count > $1.count }
     }
 
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: 0) {
-            Picker("Language", selection: $language) {
-                Text("All Languages").tag("")
-                Divider()
-                ForEach(languages, id: \.tag) { l in Text("\(l.tag)  (\(l.count))").tag(l.tag) }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .help("Show only collections in one language")
             List(selection: $category) {
                 ForEach(categories) { c in
                     Text(VODBrowser.label(c.name)).lineLimit(1).tag(c.id)
@@ -69,12 +59,15 @@ struct VODBrowser: View {
         .onChange(of: language) {
             if !categories.contains(where: { $0.id == category }) { category = categories.first?.id }
         }
+        .onChange(of: quality) { startCheckIfNeeded() }
         .onChange(of: category) { _, c in
             path = NavigationPath()
-            quality = nil
             vod.stopCheck()
             guard let c else { return }
-            Task { kind == .movies ? await vod.loadMovies(c) : await vod.loadSeries(c) }
+            Task {
+                kind == .movies ? await vod.loadMovies(c) : await vod.loadSeries(c)
+                startCheckIfNeeded()
+            }
         }
     }
 
@@ -85,7 +78,7 @@ struct VODBrowser: View {
             case .movies:
                 if let items = vod.movies[category] {
                     PosterGrid(title: name, items: byQuality(filter(items, \.title)) { vod.quick($0)?.tier }, key: category,
-                               accessory: AnyView(qualityControl(count: items.count) { vod.checkAll(items, title: name) })) { m in
+                               accessory: AnyView(checkProgress)) { m in
                         NavigationLink(value: m) {
                             PosterCard(title: m.title, poster: m.poster, caption: caption(m.year, m.rating),
                                        badges: vod.quick(m)?.badges ?? [])
@@ -96,7 +89,7 @@ struct VODBrowser: View {
             case .series:
                 if let items = vod.series[category] {
                     PosterGrid(title: name, items: byQuality(filter(items, \.title)) { vod.quick($0)?.tier }, key: category,
-                               accessory: AnyView(qualityControl(count: items.count) { vod.checkAll(items, title: name) })) { s in
+                               accessory: AnyView(checkProgress)) { s in
                         NavigationLink(value: s) {
                             PosterCard(title: s.title, poster: s.cover, caption: caption(s.year, s.rating),
                                        badges: vod.quick(s)?.badges ?? [], detail: vod.quick(s)?.counts)
@@ -115,26 +108,22 @@ struct VODBrowser: View {
         return items.filter { tier($0) == quality }
     }
 
-    /// Quality filter + the background check that measures the category.
-    private func qualityControl(count: Int, check: @escaping () -> Void) -> some View {
-        HStack(spacing: 12) {
-            if vod.isChecking {
+    /// A quality filter needs every title in the category measured: check the rest in the background.
+    private func startCheckIfNeeded() {
+        guard quality != nil, !vod.isChecking, let category else { return }
+        let name = categories.first { $0.id == category }.map { VODBrowser.label($0.name) } ?? ""
+        if kind == .movies, let items = vod.movies[category] { vod.checkAll(items, title: name) }
+        if kind == .series, let items = vod.series[category] { vod.checkAll(items, title: name) }
+    }
+
+    @ViewBuilder private var checkProgress: some View {
+        if vod.isChecking {
+            HStack(spacing: 10) {
                 ProgressView(value: Double(vod.checkDone), total: Double(max(vod.checkTotal, 1)))
                     .frame(width: 80).controlSize(.small)
-                Text("Checking \(vod.checkDone) of \(vod.checkTotal)").font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                Text("Checking quality: \(vod.checkDone) of \(vod.checkTotal)").font(.callout).foregroundStyle(.secondary).monospacedDigit()
                 Button("Stop") { vod.stopCheck() }
             }
-            Picker("Quality", selection: Binding(get: { quality ?? "" }, set: { value in
-                quality = value.isEmpty ? nil : value
-                if quality != nil, !vod.isChecking { check() }
-            })) {
-                Text("All Qualities").tag("")
-                Divider()
-                ForEach(["4K", "1080p", "720p", "SD"], id: \.self) { Text($0).tag($0) }
-            }
-            .pickerStyle(.menu)
-            .fixedSize()
-            .help("Show only titles measured at this quality. Choosing one checks the whole category in the background (\(count) titles).")
         }
     }
 

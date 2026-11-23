@@ -17,6 +17,10 @@ struct BrowserView: View {
     @State private var playlistRef: PlaylistRef? = .favorites
     @State private var selecting = SelectionModel()
     @State private var qualityFilter: QualityTier?
+    // Movies / series filters (same toolbar filter button).
+    @State private var vodQuality: String?
+    @AppStorage("vodLanguage") private var vodLanguage = ""
+    @Environment(VODStore.self) private var vod
 
     private var item: SidebarItem { selection ?? .home }
     private var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -37,7 +41,7 @@ struct BrowserView: View {
                 HomeView(selection: $selection, nav: nav)
             } else if item == .movies || item == .series {
                 // Search filters the open category here.
-                VODBrowser(kind: item == .movies ? .movies : .series, query: "")
+                VODBrowser(kind: item == .movies ? .movies : .series, query: "", language: vodLanguage, quality: vodQuality)
                     .id(item)
             } else if item == .playlists && !isSearching {
                 // Playlists on the left, that playlist's channels on the right, in one view.
@@ -74,19 +78,36 @@ struct BrowserView: View {
         // them on every page change made AppKit rebuild the toolbar (and re-lay out the sidebar) each time.
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                // One filter button: channel quality on channel pages; quality + language on Movies / Series.
                 Menu {
-                    Picker("Quality", selection: $qualityFilter) {
-                        Text("All Qualities").tag(QualityTier?.none)
-                        Divider()
-                        ForEach(QualityTier.allCases) { t in Text(t.rawValue).tag(QualityTier?.some(t)) }
+                    if isVODPage {
+                        Picker("Quality", selection: $vodQuality) {
+                            Text("All Qualities").tag(String?.none)
+                            Divider()
+                            ForEach(["4K", "1080p", "720p", "SD"], id: \.self) { Text($0).tag(String?.some($0)) }
+                        }
+                        .pickerStyle(.inline)
+                        Picker("Language", selection: $vodLanguage) {
+                            Text("All Languages").tag("")
+                            Divider()
+                            ForEach(VODBrowser.languages(item == .movies ? vod.movieCategories : vod.seriesCategories), id: \.tag) { l in
+                                Text("\(l.tag) (\(l.count))").tag(l.tag)
+                            }
+                        }
+                        .pickerStyle(.inline)
+                    } else {
+                        Picker("Quality", selection: $qualityFilter) {
+                            Text("All Qualities").tag(QualityTier?.none)
+                            Divider()
+                            ForEach(QualityTier.allCases) { t in Text(t.rawValue).tag(QualityTier?.some(t)) }
+                        }
+                        .pickerStyle(.inline)
                     }
-                    .pickerStyle(.inline)
                 } label: {
-                    Label(qualityFilter?.rawValue ?? "Quality",
-                          systemImage: qualityFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                    Label(filterLabel, systemImage: filterActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
                 }
-                .disabled(!showsChannelList)
-                .help("Filter by measured quality (only channels that were played or checked have one)")
+                .disabled(!showsChannelList && !isVODPage)
+                .help(isVODPage ? "Filter by measured quality or by language" : "Filter by measured quality (only channels that were played or checked have one)")
             }
             ToolbarItem(placement: .primaryAction) {
                 Button(selecting.isActive ? "Done" : "Select") {
@@ -135,6 +156,13 @@ struct BrowserView: View {
             nav.scrollTarget = nil
             DispatchQueue.main.async { nav.scrollTarget = id }
         }
+    }
+
+    private var isVODPage: Bool { !isSearching && (item == .movies || item == .series) }
+    private var filterActive: Bool { isVODPage ? (vodQuality != nil || !vodLanguage.isEmpty) : qualityFilter != nil }
+    private var filterLabel: String {
+        if isVODPage { return [vodQuality, vodLanguage.isEmpty ? nil : vodLanguage].compactMap { $0 }.joined(separator: " · ").nilIfEmpty ?? "Filter" }
+        return qualityFilter?.rawValue ?? "Quality"
     }
 
     /// Home has no channel list, so the list tools are disabled there (not removed).
@@ -294,4 +322,8 @@ extension View {
             }
         }
     }
+}
+
+extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
