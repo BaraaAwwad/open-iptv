@@ -23,7 +23,13 @@ final class AirPlayStreamer {
 
     /// Starts repackaging `source` and returns the HLS address a TV can open.
     func start(_ source: URL) async throws -> URL {
+        // One connection at a time: make sure the previous ffmpeg has really exited first.
+        let previous = process
         stop()
+        if let previous {
+            for _ in 0..<20 where previous.isRunning { try await Task.sleep(for: .milliseconds(100)) }
+            if previous.isRunning { kill(previous.processIdentifier, SIGKILL) }
+        }
         guard let ffmpeg = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"].first(where: FileManager.default.isExecutableFile)
         else { throw Failure.noFFmpeg }
         guard let ip = Self.lanAddress() else { throw Failure.noNetwork }
@@ -70,7 +76,7 @@ final class AirPlayStreamer {
     }
 
     func stop() {
-        process?.terminate()
+        process?.interrupt() // ffmpeg closes its input cleanly on SIGINT
         process = nil
         server?.stop()
         server = nil

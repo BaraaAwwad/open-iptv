@@ -11,6 +11,10 @@ final class PlayerModel {
     @ObservationIgnored private let library: Library
     @ObservationIgnored private var epgTask: Task<Void, Never>?
     @ObservationIgnored private var timeoutTask: Task<Void, Never>?
+    /// Opening a stream waits a beat so flipping through channels doesn't open a connection per key press.
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
+    /// Automatic reconnects for the current channel (capped, so a flaky stream can't loop forever).
+    @ObservationIgnored private var autoRetries = 0
 
     // AirPlay: the stream is repackaged to HLS and played through AVPlayer so a TV can take it.
     enum AirPlayState: Equatable { case off, preparing, ready, failed(String) }
@@ -72,15 +76,29 @@ final class PlayerModel {
         isPaused = false
         isBehindLive = false
         programmes = []
-        library.markWatched(channel)
-        loadEPG(channel)
-        if airPlay != .off {
-            // Already on AirPlay: switch the TV to the new channel.
-            startAirPlay(url)
-            return
+        autoRetries = 0
+        timeoutTask?.cancel()
+        loadTask?.cancel()
+        PlayerLog.write("play \(channel.id)")
+        loadTask = Task { [weak self] in
+            // Settle first: holding ↓ through ten channels should open one stream, not ten.
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let self, !Task.isCancelled, self.channel == channel else { return }
+            library.markWatched(channel)
+            loadEPG(channel)
+            if airPlay != .off {
+                startAirPlay(url) // already on AirPlay: switch the TV to the new channel
+                return
+            }
+            mpv.load(url)
+            watchForStall(channel)
         }
-        mpv.load(url)
-        watchForStall(channel)
+    }
+
+    /// The stream's server as "host:port" — never the full address, which carries the password.
+    func serverHost(_ c: Channel) -> String? {
+        guard let u = library.streamURL(c), let host = u.host() else { return nil }
+        return u.port.map { "\(host):\($0)" } ?? host
     }
 
     // MARK: AirPlay
@@ -168,7 +186,9 @@ final class PlayerModel {
     }
 
     func close() {
+        loadTask?.cancel()
         if airPlay != .off { stopAirPlay(resumeHere: false) }
+        PlayerLog.write("close")
         mpv.stop()
         epgTask?.cancel()
         timeoutTask?.cancel()
@@ -183,6 +203,7 @@ final class PlayerModel {
         timeoutTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(12))
             guard let self, !Task.isCancelled, self.channel == channel, status == .loading else { return }
+            PlayerLog.write("no response after 12s, stopping \(channel.id)")
             mpv.stop()
             status = .failed("This channel isn't responding.")
         }
@@ -209,10 +230,53 @@ final class PlayerModel {
             isPaused = p
             if p && status == .playing { isBehindLive = true }
         case .failed(let msg):
+            PlayerLog.write("failed: \(msg) \(channel?.id ?? "")")
             status = .failed(msg == "loading failed" ? "This channel isn't available right now." : msg.capitalizedFirst)
         case .ended:
-            // Live streams shouldn't end; treat it as a drop and reconnect once.
-            if status == .playing { retry() }
+            // Live streams shouldn't end. Reconnect, but at most twice: a provider that keeps cutting
+            // the stream (e.g. over its connection limit) must not be hammered in a loop.
+            guard status == .playing, let channel, let url = library.streamURL(channel) else { return }
+            if autoRetries < 2 {
+                autoRetries += 1
+                PlayerLog.write("stream ended, reconnect \(autoRetries) \(channel.id)")
+                status = .loading
+                loadTask?.cancel()
+                loadTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(1))
+                    guard let self, !Task.isCancelled, self.channel == channel else { return }
+                    mpv.load(url)
+                    watchForStall(channel)
+                }
+            } else {
+                PlayerLog.write("stream ended again, giving up \(channel.id)")
+                mpv.stop()
+                status = .failed("This stream keeps dropping.")
+            }
+        }
+    }
+}
+
+/// A small diagnostics log (~/Library/Logs/Open IPTV/player.log): channel switches, drops, retries.
+/// Channel ids only: never stream addresses, which contain the account password.
+enum PlayerLog {
+    private static let url: URL = {
+        let dir = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].appendingPathComponent("Logs/Open IPTV")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("player.log")
+    }()
+    private static let queue = DispatchQueue(label: "openiptv.log")
+
+    static func write(_ line: String) {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        queue.async {
+            if let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int, size > 1_000_000 {
+                try? FileManager.default.removeItem(at: url)
+            }
+            if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil) }
+            guard let h = try? FileHandle(forWritingTo: url) else { return }
+            h.seekToEndOfFile()
+            h.write(Data("\(stamp) \(line)\n".utf8))
+            try? h.close()
         }
     }
 }

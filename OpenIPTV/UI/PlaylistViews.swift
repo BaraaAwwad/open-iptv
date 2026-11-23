@@ -1,54 +1,58 @@
 import SwiftUI
 
-/// Menu items: Favorites first, then your playlists (checked when the channel is in them), then New Playlist….
+/// Menu items for one channel: Favorites first, then your playlists, each a checkmark you can tick or
+/// untick, then New Playlist….
 struct PlaylistMenuItems: View {
     @Environment(Library.self) private var library
     let channel: Channel
 
     var body: some View {
-        item("Favorites", "star", .favorites)
+        toggle("Favorites", .favorites)
         if !library.playlists.isEmpty {
             Divider()
-            ForEach(library.playlists) { p in
-                item(p.name, "music.note.list", .custom(p.id))
-            }
+            ForEach(library.playlists) { p in toggle(p.name, .custom(p.id)) }
         }
         Divider()
-        Button {
-            library.newPlaylistRequest = .init(channel: channel)
-        } label: {
-            Label("New Playlist…", systemImage: "plus")
-        }
+        Button("New Playlist…") { library.newPlaylistRequest = .init(channels: [channel]) }
     }
 
-    private func item(_ title: String, _ icon: String, _ ref: PlaylistRef) -> some View {
-        Button {
-            library.toggle(channel, in: ref)
-        } label: {
-            if library.contains(channel, in: ref) {
-                Label(title, systemImage: "checkmark")
-            } else {
-                Label(title, systemImage: icon)
-            }
-        }
+    private func toggle(_ title: String, _ ref: PlaylistRef) -> some View {
+        Toggle(title, isOn: Binding(
+            get: { library.contains(channel, in: ref) },
+            set: { _ in library.toggle(channel, in: ref) }
+        ))
     }
 }
 
-/// The player's "Add to Playlist" button.
-struct AddToPlaylistButton: View {
+/// Menu items for several channels at once (select mode): adds them all to the chosen playlist.
+struct BulkPlaylistMenuItems: View {
     @Environment(Library.self) private var library
+    let channels: [Channel]
+    var done: () -> Void = {}
+
+    var body: some View {
+        Button("Favorites") { library.add(channels, to: .favorites); done() }
+        if !library.playlists.isEmpty {
+            Divider()
+            ForEach(library.playlists) { p in
+                Button(p.name) { library.add(channels, to: .custom(p.id)); done() }
+            }
+        }
+        Divider()
+        Button("New Playlist…") { library.newPlaylistRequest = .init(channels: channels); done() }
+    }
+}
+
+/// The player's "Add to Playlist" button: always a +, the menu shows where the channel already is.
+struct AddToPlaylistButton: View {
     let channel: Channel
     var size: CGFloat = 34
-
-    private var inAny: Bool {
-        library.contains(channel, in: .favorites) || library.playlists.contains { $0.channelIDs.contains(channel.id) }
-    }
 
     var body: some View {
         Menu {
             PlaylistMenuItems(channel: channel)
         } label: {
-            Image(systemName: inAny ? "checkmark" : "plus")
+            Image(systemName: "plus")
                 .font(.system(size: size * 0.4, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(width: size, height: size)
@@ -73,8 +77,10 @@ struct PlaylistNameSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(request.renaming == nil ? "New Playlist" : "Rename Playlist").font(.headline)
-            if let channel = request.channel {
+            if request.channels.count == 1, let channel = request.channels.first {
                 Text("\(channel.displayName) will be added to it.").font(.callout).foregroundStyle(.secondary)
+            } else if request.channels.count > 1 {
+                Text("\(request.channels.count) channels will be added to it.").font(.callout).foregroundStyle(.secondary)
             }
             TextField("Name", text: $name, prompt: Text("Match Day"))
                 .textFieldStyle(.roundedBorder)
@@ -99,7 +105,7 @@ struct PlaylistNameSheet: View {
         if let id = request.renaming {
             library.renamePlaylist(id, to: name)
         } else {
-            library.createPlaylist(name, with: request.channel)
+            library.createPlaylist(name, with: request.channels)
         }
         dismiss()
     }

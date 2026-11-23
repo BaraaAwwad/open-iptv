@@ -37,7 +37,8 @@ final class MPV {
             ("network-timeout", "15"),
             ("demuxer-lavf-probesize", "1000000"),
             ("demuxer-lavf-analyzeduration", "1.5"),
-            ("stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=4"),
+            // Ride out short drops mid-stream, but never retry a dead channel in a loop.
+            ("stream-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_delay_max=2"),
             ("user-agent", "VLC/3.0.21 LibVLC/3.0.21"),
             ("volume-max", "130"),
         ]
@@ -61,6 +62,16 @@ final class MPV {
     func setPause(_ p: Bool) { set("pause", p ? "yes" : "no") }
     func setVolume(_ v: Double) { set("volume", String(Int(v))) }
     func setMute(_ m: Bool) { set("mute", m ? "yes" : "no") }
+
+    /// A property as text, e.g. "video-params/w" → "1920". nil when mpv doesn't have it (yet).
+    func string(_ name: String) -> String? {
+        guard let c = mpv_get_property_string(handle, name) else { return nil }
+        defer { mpv_free(c) }
+        let s = String(cString: c)
+        return s.isEmpty ? nil : s
+    }
+
+    func double(_ name: String) -> Double? { string(name).flatMap(Double.init) }
 
     private func command(_ args: String...) {
         var cargs = args.map { UnsafePointer<CChar>(strdup($0)) }

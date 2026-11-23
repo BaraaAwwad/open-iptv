@@ -22,7 +22,8 @@ final class Library {
     var newPlaylistRequest: NewPlaylistRequest?
     struct NewPlaylistRequest: Identifiable {
         let id = UUID()
-        var channel: Channel? = nil
+        /// Channels to put in the new playlist.
+        var channels: [Channel] = []
         /// When set, the sheet renames this playlist instead of creating one.
         var renaming: UUID? = nil
     }
@@ -233,10 +234,10 @@ final class Library {
     }
 
     @discardableResult
-    func createPlaylist(_ name: String, with channel: Channel? = nil) -> UUID {
+    func createPlaylist(_ name: String, with channels: [Channel] = []) -> UUID {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         var p = UserPlaylist(name: trimmed.isEmpty ? "New Playlist" : trimmed)
-        if let channel { p.channelIDs = [channel.id] }
+        p.channelIDs = channels.map(\.id)
         playlists.append(p)
         savePlaylists()
         return p.id
@@ -259,9 +260,39 @@ final class Library {
     }
 
     func toggleFavorite(_ c: Channel) {
-        guard let s = active else { return }
         if let i = favorites.firstIndex(of: c.id) { favorites.remove(at: i) } else { favorites.append(c.id) }
+        saveFavorites()
+    }
+
+    private func saveFavorites() {
+        guard let s = active else { return }
         UserDefaults.standard.set(favorites, forKey: "fav-\(s.id)")
+    }
+
+    /// Bulk add (skips channels already there).
+    func add(_ chans: [Channel], to ref: PlaylistRef) {
+        switch ref {
+        case .favorites:
+            for c in chans where !favorites.contains(c.id) { favorites.append(c.id) }
+            saveFavorites()
+        case .custom(let id):
+            guard let i = playlists.firstIndex(where: { $0.id == id }) else { return }
+            for c in chans where !playlists[i].channelIDs.contains(c.id) { playlists[i].channelIDs.append(c.id) }
+            savePlaylists()
+        }
+    }
+
+    func remove(_ chans: [Channel], from ref: PlaylistRef) {
+        let ids = Set(chans.map(\.id))
+        switch ref {
+        case .favorites:
+            favorites.removeAll { ids.contains($0) }
+            saveFavorites()
+        case .custom(let id):
+            guard let i = playlists.firstIndex(where: { $0.id == id }) else { return }
+            playlists[i].channelIDs.removeAll { ids.contains($0) }
+            savePlaylists()
+        }
     }
 
     func isRecent(_ c: Channel) -> Bool { recents.contains(c.id) }

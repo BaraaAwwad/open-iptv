@@ -133,3 +133,16 @@ final class Navigator {
         return nil
     }
 }
+
+/// Select mode: pick several channels, then add them to a playlist or remove them in one go.
+@MainActor @Observable
+final class SelectionModel {
+    var isActive = false
+    private(set) var ids: Set<String> = []
+
+    func contains(_ c: Channel) -> Bool { ids.contains(c.id) }
+    func toggle(_ c: Channel) { if ids.contains(c.id) { ids.remove(c.id) } else { ids.insert(c.id) } }
+    func selectAll(_ chans: [Channel]) { ids = Set(chans.map(\.id)) }
+    func clear() { ids = [] }
+    func end() { isActive = false; ids = [] }
+}

@@ -15,6 +15,7 @@ struct BrowserView: View {
     @State private var expanded: Set<String> = []
     @State private var nav = Navigator()
     @State private var playlistRef: PlaylistRef? = .favorites
+    @State private var selecting = SelectionModel()
 
     private var item: SidebarItem { selection ?? .home }
     private var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -41,7 +42,9 @@ struct BrowserView: View {
                         scrollID: "playlist-\(String(describing: playlistRef))",
                         showGroup: true,
                         mode: viewMode,
-                        nav: nav
+                        nav: nav,
+                        selection: selecting,
+                        playlist: playlistRef ?? .favorites
                     )
                 }
             } else {
@@ -52,12 +55,21 @@ struct BrowserView: View {
                     scrollID: isSearching ? "search" : "\(item)",
                     showGroup: isSearching || !isGroup,
                     mode: viewMode,
-                    nav: nav
+                    nav: nav,
+                    selection: selecting
                 )
             }
         }
         .searchable(text: $query, placement: .toolbar, prompt: "Search channels")
         .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if item != .home || isSearching {
+                    Button(selecting.isActive ? "Done" : "Select") {
+                        if selecting.isActive { selecting.end() } else { selecting.isActive = true }
+                    }
+                    .help("Select several channels to add to or remove from a playlist")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 if item != .home || isSearching {
                 Picker("View", selection: $viewMode) {
@@ -75,7 +87,9 @@ struct BrowserView: View {
         .navigationTitle("")
         .onAppear {
             nav.isActive = { !player.isFull }
-            nav.onPlay = { channel, list in player.play(channel, in: list) }
+            nav.onPlay = { channel, list in
+                if selecting.isActive { selecting.toggle(channel) } else { player.play(channel, in: list) }
+            }
             nav.query = { query }
             nav.setQuery = { query = $0 }
             nav.install()
@@ -90,7 +104,8 @@ struct BrowserView: View {
                 nav.scrollTarget = id
             }
         }
-        .onChange(of: selection) { query = "" }
+        .onChange(of: selection) { query = ""; selecting.end() }
+        .onChange(of: playlistRef) { selecting.clear() }
         .onChange(of: viewMode) {
             let id = nav.focusID
             nav.scrollTarget = nil

@@ -11,6 +11,9 @@ struct ChannelBrowser: View {
     let showGroup: Bool
     let mode: ViewMode
     let nav: Navigator
+    var selection: SelectionModel
+    /// Set when showing one of My Playlists, so channels can be removed from it.
+    var playlist: PlaylistRef? = nil
 
     @State private var width: CGFloat = 900
 
@@ -49,6 +52,14 @@ struct ChannelBrowser: View {
                 }
             }
         }
+        .overlay(alignment: .bottom) {
+            if selection.isActive {
+                SelectionBar(channels: channels, selection: selection, playlist: playlist)
+                    .padding(.bottom, 20)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: selection.isActive)
         .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
         .onChange(of: columnCount, initial: true) { nav.columns = columnCount }
     }
@@ -69,7 +80,10 @@ struct ChannelBrowser: View {
                   spacing: 30) {
             ForEach(channels) { channel in
                 ChannelTile(channel: channel, focused: nav.focusID == channel.id,
-                            isFavorite: library.isFavorite(channel)) { play(channel) }
+                            isFavorite: library.isFavorite(channel)) { activate(channel) }
+                    .overlay(alignment: .topLeading) {
+                        if selection.isActive { SelectBadge(selected: selection.contains(channel)).padding(8) }
+                    }
                     .onHover { nav.hover(channel.id, $0) }
                     .contextMenu { menu(channel) }
                     .id(channel.id)
@@ -82,13 +96,22 @@ struct ChannelBrowser: View {
             ForEach(channels) { channel in
                 ChannelRow(channel: channel, focused: nav.focusID == channel.id,
                            isFavorite: library.isFavorite(channel),
-                           group: showGroup ? library.groupName(channel.groupID).titleCased : nil) { play(channel) }
+                           group: showGroup ? library.groupName(channel.groupID).titleCased : nil) { activate(channel) }
+                    .overlay(alignment: .trailing) {
+                        if selection.isActive { SelectBadge(selected: selection.contains(channel)).padding(.trailing, 40) }
+                    }
                     .onHover { nav.hover(channel.id, $0) }
                     .contextMenu { menu(channel) }
                     .id(channel.id)
             }
         }
         .padding(.horizontal, -12)
+    }
+
+    /// Click: play, or in select mode tick / untick.
+    private func activate(_ channel: Channel) {
+        nav.focusID = channel.id
+        if selection.isActive { selection.toggle(channel) } else { player.play(channel, in: channels) }
     }
 
     private func play(_ channel: Channel) {
@@ -99,9 +122,72 @@ struct ChannelBrowser: View {
     @ViewBuilder private func menu(_ channel: Channel) -> some View {
         Button("Play") { play(channel) }
         Menu("Add to Playlist") { PlaylistMenuItems(channel: channel) }
+        if let playlist {
+            Divider()
+            Button("Remove from “\(library.name(of: playlist))”", role: .destructive) {
+                withAnimation(.easeOut(duration: 0.2)) { library.remove([channel], from: playlist) }
+            }
+        }
         if library.isRecent(channel) {
             Button("Remove from Recently Watched") { library.removeRecent(channel) }
         }
+    }
+}
+
+// MARK: - Select mode
+
+struct SelectBadge: View {
+    let selected: Bool
+    var body: some View {
+        Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+            .font(.system(size: 20, weight: .semibold))
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(.white, selected ? Color.accentColor : Color.black.opacity(0.35))
+            .background(Circle().fill(selected ? Color.clear : Color.black.opacity(0.25)))
+            .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+            .allowsHitTesting(false)
+    }
+}
+
+/// Floating bar in select mode: count, select all, add to playlist, remove from this playlist, done.
+struct SelectionBar: View {
+    @Environment(Library.self) private var library
+    let channels: [Channel]
+    let selection: SelectionModel
+    let playlist: PlaylistRef?
+
+    private var picked: [Channel] { channels.filter { selection.contains($0) } }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Text(selection.ids.isEmpty ? "Select channels" : "\(selection.ids.count) selected")
+                .font(.callout.weight(.semibold))
+                .monospacedDigit()
+            Divider().frame(height: 18)
+            Button(selection.ids.count == channels.count ? "Deselect All" : "Select All") {
+                if selection.ids.count == channels.count { selection.clear() } else { selection.selectAll(channels) }
+            }
+            Menu("Add to Playlist") {
+                BulkPlaylistMenuItems(channels: picked) { selection.end() }
+            }
+            .fixedSize()
+            .disabled(selection.ids.isEmpty)
+            if let playlist {
+                Button("Remove from “\(library.name(of: playlist))”", role: .destructive) {
+                    library.remove(picked, from: playlist)
+                    selection.clear()
+                }
+                .disabled(selection.ids.isEmpty)
+            }
+            Divider().frame(height: 18)
+            Button("Done") { selection.end() }
+                .keyboardShortcut(.cancelAction)
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .glassCapsule()
+        .shadow(color: .black.opacity(0.25), radius: 16, y: 8)
     }
 }
 

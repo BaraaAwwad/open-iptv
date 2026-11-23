@@ -53,8 +53,11 @@ struct PlayerScreen: View {
     @Environment(PlayerModel.self) private var player
     @Environment(Library.self) private var library
     @State private var controlsVisible = true
-    @State private var hideTask: Task<Void, Never>?
+    /// The auto-hide timer lives in a plain object: as view state it re-rendered every control on each
+    /// mouse movement, which ate clicks.
+    @State private var hider = HideTimer()
     @State private var overControls = false
+    @State private var showInfo = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -79,6 +82,15 @@ struct PlayerScreen: View {
                 statusOverlay
             }
 
+            if showInfo {
+                StreamInfoPanel(isShown: $showInfo)
+                    .onHover { overControls = $0 }
+                    .padding(.top, 112)
+                    .padding(.trailing, 22)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+
             if controlsVisible {
                 VStack(spacing: 0) {
                     topBar.onHover { overControls = $0 }
@@ -86,7 +98,7 @@ struct PlayerScreen: View {
                     bottomBar.onHover { overControls = $0 }
                 }
                 .padding(.horizontal, 22)
-                .padding(.top, isFullScreen ? 18 : 40)
+                .padding(.top, 60) // below the title bar / full-screen menu bar zone, which swallows clicks
                 .padding(.bottom, 22)
                 .transition(.opacity)
             }
@@ -108,8 +120,9 @@ struct PlayerScreen: View {
         .onKeyPress(.space) { player.togglePause(); showControls(); return .handled }
         .onKeyPress(.leftArrow) { player.volume = max(0, player.volume - 5); showControls(); return .handled }
         .onKeyPress(.rightArrow) { player.volume = min(130, player.volume + 5); showControls(); return .handled }
-        .onKeyPress(characters: .init(charactersIn: "mfs")) { press in
+        .onKeyPress(characters: .init(charactersIn: "mfsi")) { press in
             switch press.characters {
+            case "i": showInfo.toggle()
             case "m": player.isMuted.toggle()
             case "f": toggleFullScreen()
             case "s": if let c = player.channel { library.toggleFavorite(c) }
@@ -123,8 +136,9 @@ struct PlayerScreen: View {
         .onChange(of: player.status) { _, status in
             if status == .playing { hideControls(after: 1.2) } else { controlsVisible = true }
         }
-        .onDisappear { hideTask?.cancel(); NSCursor.setHiddenUntilMouseMoves(false) }
+        .onDisappear { hider.cancel(); NSCursor.setHiddenUntilMouseMoves(false) }
         .animation(.easeInOut(duration: 0.22), value: controlsVisible)
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: showInfo)
     }
 
     // MARK: Center
@@ -189,6 +203,8 @@ struct PlayerScreen: View {
                     .controlSize(.small)
                     .tint(.white)
                 capsuleButton(volumeIcon, help: "Mute (M)") { player.isMuted.toggle() }
+                capsuleButton("info.circle", help: "Stream info (I)") { showInfo.toggle() }
+                    .foregroundStyle(showInfo ? .blue : .white)
                 capsuleButton("airplayvideo", help: player.airPlay == .off ? "AirPlay to a TV" : "Stop AirPlay") { player.toggleAirPlay() }
                     .foregroundStyle(player.airPlay == .off ? .white : .blue)
             }
@@ -277,15 +293,14 @@ struct PlayerScreen: View {
     private func toggleFullScreen() { NSApp.keyWindow?.toggleFullScreen(nil) }
 
     private func showControls() {
-        controlsVisible = true
+        if !controlsVisible { controlsVisible = true }
+        if !focused { focused = true } // keep keyboard shortcuts working after clicking a control
         hideControls(after: 1.2)
     }
 
     private func hideControls(after seconds: Double) {
-        hideTask?.cancel()
-        hideTask = Task {
-            try? await Task.sleep(for: .seconds(seconds))
-            guard !Task.isCancelled, player.status == .playing, !overControls else { return }
+        hider.schedule(after: seconds) {
+            guard player.status == .playing, !overControls else { return }
             controlsVisible = false
             NSCursor.setHiddenUntilMouseMoves(true)
         }
@@ -437,4 +452,16 @@ struct AirPlayCard: View {
         }
         .buttonStyle(PressScale())
     }
+}
+
+/// Debounced "hide the controls" timer that doesn't trigger SwiftUI updates when rescheduled.
+final class HideTimer {
+    private var work: DispatchWorkItem?
+    func schedule(after seconds: Double, _ action: @escaping () -> Void) {
+        work?.cancel()
+        let w = DispatchWorkItem(block: action)
+        work = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: w)
+    }
+    func cancel() { work?.cancel() }
 }
