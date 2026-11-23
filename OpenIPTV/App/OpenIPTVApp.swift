@@ -33,8 +33,6 @@ struct OpenIPTVApp: App {
                 .frame(minWidth: 860, minHeight: 540)
         }
         .defaultSize(width: 1280, height: 800)
-        // No title bar or toolbar: like the TV app, the window is all content (traffic lights float on top).
-        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {}
             SidebarCommands()
@@ -66,16 +64,23 @@ struct RootView: View {
                     .opacity(player.isFull ? 0 : 1)
                     .allowsHitTesting(!player.isFull)
             }
-            if player.mode == .mini {
-                MiniPlayer()
-                    .transition(.scale(scale: 0.85).combined(with: .opacity))
+            // The player layers animate on their own. The animation used to sit on this whole ZStack, so
+            // every PiP / full-screen switch also animated the split view re-laying out its sidebar.
+            ZStack {
+                if player.mode == .mini {
+                    MiniPlayer()
+                        .transition(.scale(scale: 0.85).combined(with: .opacity))
+                }
+                if player.isFull {
+                    PlayerScreen()
+                        .transition(.opacity)
+                }
             }
-            if player.isFull {
-                PlayerScreen()
-                    .transition(.opacity)
-            }
+            .animation(.spring(response: 0.32, dampingFraction: 0.85), value: player.mode)
         }
-        .animation(.spring(response: 0.32, dampingFraction: 0.85), value: player.mode)
+        // Full-screen playback hides the window toolbar here, at the window's root, so the split view
+        // and its sidebar never see a modifier change (toggling it inside the split view rebuilt them).
+        .toolbarVisibility(player.isFull ? .hidden : .automatic, for: .windowToolbar)
         .sheet(item: Binding(get: { library.newPlaylistRequest }, set: { library.newPlaylistRequest = $0 })) { request in
             PlaylistNameSheet(request: request)
         }

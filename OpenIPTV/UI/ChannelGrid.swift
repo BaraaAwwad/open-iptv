@@ -14,8 +14,6 @@ struct ChannelBrowser: View {
     var selection: SelectionModel
     /// Set when showing one of My Playlists, so channels can be removed from it.
     var playlist: PlaylistRef? = nil
-    /// Page controls (quality filter, select, grid / list) shown at the right of the header.
-    var controls: AnyView = AnyView(EmptyView())
 
     @State private var fittedColumns = 4
 
@@ -85,7 +83,6 @@ struct ChannelBrowser: View {
                 .foregroundStyle(.tertiary)
             Spacer(minLength: 12)
             ScanControl(channels: channels, title: title)
-            controls
         }
     }
 

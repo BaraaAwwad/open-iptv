@@ -29,7 +29,6 @@ struct BrowserView: View {
         NavigationSplitView {
             Sidebar(selection: $selection, expanded: $expanded)
                 .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 320)
-                .toolbar(removing: .sidebarToggle)
         } detail: {
             if item == .home && !isSearching {
                 HomeView(selection: $selection, nav: nav)
@@ -47,8 +46,7 @@ struct BrowserView: View {
                         mode: viewMode,
                         nav: nav,
                         selection: selecting,
-                        playlist: playlistRef ?? .favorites,
-                        controls: AnyView(controls)
+                        playlist: playlistRef ?? .favorites
                     )
                 }
             } else {
@@ -60,14 +58,48 @@ struct BrowserView: View {
                     showGroup: isSearching || !isGroup,
                     mode: viewMode,
                     nav: nav,
-                    selection: selecting,
-                    controls: AnyView(controls)
+                    selection: selecting
                 )
             }
         }
-        // Search lives at the top of the sidebar and the page controls live in each page's header,
-        // so the window has no toolbar to rebuild when switching pages or entering full-screen playback.
-        .searchable(text: $query, placement: .sidebar, prompt: "Search channels")
+        .searchable(text: $query, placement: .toolbar, prompt: "Search channels")
+        // Toolbar items are always present and only disabled where they don't apply: adding and removing
+        // them on every page change made AppKit rebuild the toolbar (and re-lay out the sidebar) each time.
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Picker("Quality", selection: $qualityFilter) {
+                        Text("All Qualities").tag(QualityTier?.none)
+                        Divider()
+                        ForEach(QualityTier.allCases) { t in Text(t.rawValue).tag(QualityTier?.some(t)) }
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    Label(qualityFilter?.rawValue ?? "Quality",
+                          systemImage: qualityFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                }
+                .disabled(!showsChannelList)
+                .help("Filter by measured quality (only channels that were played or checked have one)")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button(selecting.isActive ? "Done" : "Select") {
+                    if selecting.isActive { selecting.end() } else { selecting.isActive = true }
+                }
+                .disabled(!showsChannelList)
+                .help("Select several channels to add to or remove from a playlist")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Picker("View", selection: $viewMode) {
+                    ForEach(ViewMode.allCases, id: \.self) { m in
+                        Label(m.label, systemImage: m.icon).tag(m)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelStyle(.iconOnly)
+                .disabled(!showsChannelList)
+                .help("Grid or list (⌘1 / ⌘2)")
+            }
+        }
         .navigationTitle("")
         .onAppear {
             nav.isActive = { !player.isFull }
@@ -97,40 +129,8 @@ struct BrowserView: View {
         }
     }
 
-    /// Quality filter, Select, Grid / List: shown in the page header next to the title.
-    private var controls: some View {
-        HStack(spacing: 10) {
-            Menu {
-                Picker("Quality", selection: $qualityFilter) {
-                    Text("All Qualities").tag(QualityTier?.none)
-                    Divider()
-                    ForEach(QualityTier.allCases) { t in Text(t.rawValue).tag(QualityTier?.some(t)) }
-                }
-                .pickerStyle(.inline)
-            } label: {
-                Label(qualityFilter?.rawValue ?? "Quality",
-                      systemImage: qualityFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
-            }
-            .fixedSize()
-            .help("Filter by measured quality (only channels that were played or checked have one)")
-
-            Button(selecting.isActive ? "Done" : "Select") {
-                if selecting.isActive { selecting.end() } else { selecting.isActive = true }
-            }
-            .help("Select several channels to add to or remove from a playlist")
-
-            Picker("View", selection: $viewMode) {
-                ForEach(ViewMode.allCases, id: \.self) { m in
-                    Label(m.label, systemImage: m.icon).tag(m)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelStyle(.iconOnly)
-            .fixedSize()
-            .help("Grid or list (⌘1 / ⌘2)")
-        }
-        .controlSize(.regular)
-    }
+    /// Home has no channel list, so the list tools are disabled there (not removed).
+    private var showsChannelList: Bool { item != .home || isSearching }
 
     private var isGroup: Bool {
         if case .group = item { return true }
