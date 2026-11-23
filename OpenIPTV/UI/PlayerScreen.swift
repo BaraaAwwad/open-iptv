@@ -1,9 +1,51 @@
 import SwiftUI
 
+/// Hosts the one shared mpv video view. The mini player and the full player each get their own
+/// container; the video view moves to whichever container appeared last, so playback never restarts.
 struct VideoSurface: NSViewRepresentable {
     let view: MPVVideoView
-    func makeNSView(context: Context) -> MPVVideoView { view }
-    func updateNSView(_ nsView: MPVVideoView, context: Context) {}
+    /// Only the visible player owns the video (the mini player stays mounted under the full one).
+    var active = true
+
+    func makeNSView(context: Context) -> VideoContainer { VideoContainer(video: view) }
+    func updateNSView(_ container: VideoContainer, context: Context) {
+        container.isActive = active
+        if active { container.claim() }
+    }
+    static func dismantleNSView(_ container: VideoContainer, coordinator: ()) { container.release() }
+}
+
+final class VideoContainer: NSView {
+    private let video: MPVVideoView
+    var isActive = true
+
+    init(video: MPVVideoView) {
+        self.video = video
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.cgColor
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil && isActive { claim() }
+    }
+
+    func claim() {
+        guard video.superview !== self else { return }
+        video.removeFromSuperview()
+        video.frame = bounds
+        video.autoresizingMask = [.width, .height]
+        addSubview(video)
+    }
+
+    func release() {
+        if video.superview === self { video.removeFromSuperview() }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 /// Full-window player. Nothing is drawn over the picture unless the mouse moves.
@@ -126,7 +168,8 @@ struct PlayerScreen: View {
     private var topBar: some View {
         HStack(alignment: .top) {
             HStack(spacing: 2) {
-                capsuleButton("chevron.left", help: "Back to channels (Esc)") { player.close() }
+                capsuleButton("xmark", help: "Stop and close") { player.close() }
+                capsuleButton("pip.exit", help: "Picture in picture (Esc)") { player.mode = .mini }
                 capsuleButton(isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                               help: "Full screen (F)") { toggleFullScreen() }
             }
@@ -264,8 +307,9 @@ struct PlayerScreen: View {
         }
     }
 
+    /// Esc leaves window full screen first, then shrinks to picture in picture (playback keeps going).
     private func exit() {
-        if isFullScreen { toggleFullScreen() } else { player.close() }
+        if isFullScreen { toggleFullScreen() } else { player.mode = .mini }
     }
 }
 

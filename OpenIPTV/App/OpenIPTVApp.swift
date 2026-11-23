@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct TunerApp: App {
+struct OpenIPTVApp: App {
     @State private var library: Library
     @State private var player: PlayerModel
 
@@ -13,7 +13,7 @@ struct TunerApp: App {
 
     var body: some Scene {
         // One window: most providers allow a single connection, so one player at a time.
-        Window("Tuner", id: "main") {
+        Window("Open IPTV", id: "main") {
             RootView()
                 .environment(library)
                 .environment(player)
@@ -47,15 +47,19 @@ struct RootView: View {
                 WelcomeView()
             } else {
                 BrowserView()
-                    .opacity(player.isPresented ? 0 : 1)
-                    .allowsHitTesting(!player.isPresented)
+                    .opacity(player.isFull ? 0 : 1)
+                    .allowsHitTesting(!player.isFull)
             }
-            if player.isPresented {
+            if player.mode == .mini {
+                MiniPlayer()
+                    .transition(.scale(scale: 0.85).combined(with: .opacity))
+            }
+            if player.isFull {
                 PlayerScreen()
                     .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.2), value: player.isPresented)
+        .animation(.spring(response: 0.32, dampingFraction: 0.85), value: player.mode)
         .task { await library.load() }
     }
 }

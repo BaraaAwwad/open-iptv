@@ -53,10 +53,10 @@ struct BrowserView: View {
                 }
             }
         }
-        .toolbar(player.isPresented ? .hidden : .visible, for: .windowToolbar)
+        .toolbar(player.isFull ? .hidden : .visible, for: .windowToolbar)
         .navigationTitle("")
         .onAppear {
-            nav.isActive = { !player.isPresented }
+            nav.isActive = { !player.isFull }
             nav.onPlay = { channel, list in player.play(channel, in: list) }
             nav.query = { query }
             nav.setQuery = { query = $0 }

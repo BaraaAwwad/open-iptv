@@ -64,6 +64,18 @@ struct HomeView: View {
                             player.play(channel, in: channels)
                         }
                         .frame(width: 220)
+                        .contextMenu {
+                            Button("Play") { player.play(channel, in: channels) }
+                            Divider()
+                            if target == .recents {
+                                Button("Remove from Continue Watching") {
+                                    withAnimation(.easeOut(duration: 0.2)) { library.removeRecent(channel) }
+                                }
+                            }
+                            Button(library.isFavorite(channel) ? "Remove from Favorites" : "Add to Favorites") {
+                                withAnimation(.easeOut(duration: 0.2)) { library.toggleFavorite(channel) }
+                            }
+                        }
                     }
                 }
                 .padding(.vertical, 6)

@@ -11,7 +11,10 @@ final class PlayerModel {
     @ObservationIgnored private var epgTask: Task<Void, Never>?
     @ObservationIgnored private var timeoutTask: Task<Void, Never>?
 
-    var isPresented = false
+    /// hidden → nothing playing; mini → picture in picture in a corner; full → fills the window.
+    enum Mode { case hidden, mini, full }
+    var mode: Mode = .hidden
+    var isFull: Bool { mode == .full }
     private(set) var channel: Channel?
     private(set) var list: [Channel] = []
     private(set) var status: Status = .idle
@@ -37,7 +40,7 @@ final class PlayerModel {
     func play(_ channel: Channel, in list: [Channel]) {
         self.list = list.isEmpty ? [channel] : list
         self.channel = channel
-        isPresented = true
+        if mode == .hidden { mode = .mini }
         guard let url = library.streamURL(channel) else {
             status = .failed("No stream address for this channel.")
             return
@@ -71,7 +74,7 @@ final class PlayerModel {
         mpv.stop()
         epgTask?.cancel()
         timeoutTask?.cancel()
-        isPresented = false
+        mode = .hidden
         status = .idle
         channel = nil
     }

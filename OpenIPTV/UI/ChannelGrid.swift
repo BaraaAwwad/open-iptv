@@ -101,6 +101,9 @@ struct ChannelBrowser: View {
         Button(library.isFavorite(channel) ? "Remove from Favorites" : "Add to Favorites") {
             library.toggleFavorite(channel)
         }
+        if library.isRecent(channel) {
+            Button("Remove from Recently Watched") { library.removeRecent(channel) }
+        }
     }
 }
 

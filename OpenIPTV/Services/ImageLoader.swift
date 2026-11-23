@@ -10,7 +10,7 @@ actor ImageLoader {
     private var inflight: [String: Task<NSImage?, Never>] = [:]
     private let session: URLSession = {
         let c = URLSessionConfiguration.default
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("Tuner/logos")
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("Open IPTV/logos")
         c.urlCache = URLCache(memoryCapacity: 16 << 20, diskCapacity: 400 << 20, directory: dir)
         c.requestCachePolicy = .returnCacheDataElseLoad
         c.timeoutIntervalForRequest = 10

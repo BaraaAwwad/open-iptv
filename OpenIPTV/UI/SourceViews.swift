@@ -8,7 +8,7 @@ struct WelcomeView: View {
                 .font(.system(size: 56))
                 .foregroundStyle(.tint)
             VStack(spacing: 6) {
-                Text("Welcome to Tuner").font(.largeTitle.weight(.bold))
+                Text("Welcome to Open IPTV").font(.largeTitle.weight(.bold))
                 Text("Add your IPTV provider to get started.").foregroundStyle(.secondary)
             }
             SourceForm()

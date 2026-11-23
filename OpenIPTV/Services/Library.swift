@@ -27,8 +27,21 @@ final class Library {
     // MARK: Storage
 
     private static let dir: URL = {
-        let d = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Tuner", isDirectory: true)
-        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        let fm = FileManager.default
+        let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let d = support.appendingPathComponent("Open IPTV", isDirectory: true)
+        // The app was called Tuner before; carry its data over once.
+        let old = support.appendingPathComponent("Tuner", isDirectory: true)
+        if !fm.fileExists(atPath: d.path), fm.fileExists(atPath: old.path) {
+            try? fm.moveItem(at: old, to: d)
+            if let oldDefaults = UserDefaults(suiteName: "app.tuner.mac") {
+                for (k, v) in oldDefaults.dictionaryRepresentation()
+                where k == "activeSource" || k == "volume" || k == "viewMode" || k == "pipCorner" || k.hasPrefix("fav-") || k.hasPrefix("recent-") {
+                    UserDefaults.standard.set(v, forKey: k)
+                }
+            }
+        }
+        try? fm.createDirectory(at: d, withIntermediateDirectories: true)
         return d
     }()
     private static var sourcesFile: URL { dir.appendingPathComponent("sources.json") }
@@ -173,6 +186,14 @@ final class Library {
         guard let s = active else { return }
         if let i = favorites.firstIndex(of: c.id) { favorites.remove(at: i) } else { favorites.append(c.id) }
         UserDefaults.standard.set(favorites, forKey: "fav-\(s.id)")
+    }
+
+    func isRecent(_ c: Channel) -> Bool { recents.contains(c.id) }
+
+    func removeRecent(_ c: Channel) {
+        guard let s = active else { return }
+        recents.removeAll { $0 == c.id }
+        UserDefaults.standard.set(recents, forKey: "recent-\(s.id)")
     }
 
     func markWatched(_ c: Channel) {

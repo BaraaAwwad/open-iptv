@@ -1,4 +1,4 @@
-# Tuner
+# Open IPTV
 
 A fast, native macOS IPTV player. Add an **Xtream Codes** account or an **M3U** playlist and get your channels in a clean, Apple TV–style grid, with instant search and a player that shows the picture and nothing else.
 
@@ -39,21 +39,21 @@ Requires macOS 15+, Xcode 16+, and Homebrew.
 ```bash
 brew install mpv xcodegen
 xcodegen generate
-open Tuner.xcodeproj
+open OpenIPTV.xcodeproj
 ```
 
 Or from the command line:
 
 ```bash
-xcodebuild -project Tuner.xcodeproj -scheme Tuner -configuration Release -derivedDataPath build build
-open build/Build/Products/Release/Tuner.app
+xcodebuild -project OpenIPTV.xcodeproj -scheme OpenIPTV -configuration Release -derivedDataPath build build
+open build/Build/Products/Release/Open\ IPTV.app
 ```
 
 The app links Homebrew's `libmpv` from `/opt/homebrew/lib`. A self-contained build that bundles mpv is on the to-do list.
 
 ## Privacy
 
-Playlists, including Xtream credentials, are stored only on your Mac in `~/Library/Application Support/Tuner/sources.json` (readable only by you). The channel cache next to it never contains your password: stream URLs are built when you press play.
+Playlists, including Xtream credentials, are stored only on your Mac in `~/Library/Application Support/Open IPTV/sources.json` (readable only by you). The channel cache next to it never contains your password: stream URLs are built when you press play.
 
 ## License
 

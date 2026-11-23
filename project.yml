@@ -1,6 +1,6 @@
-name: Tuner
+name: OpenIPTV
 options:
-  bundleIdPrefix: app.tuner
+  bundleIdPrefix: app.openiptv
   deploymentTarget:
     macOS: "15.0"
   createIntermediateGroups: true
@@ -10,15 +10,15 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
-  Tuner:
+  OpenIPTV:
     type: application
     platform: macOS
     sources:
-      - path: Tuner
+      - path: OpenIPTV
     info:
-      path: Tuner/Info.plist
+      path: OpenIPTV/Info.plist
       properties:
-        CFBundleDisplayName: Tuner
+        CFBundleDisplayName: Open IPTV
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.entertainment
@@ -27,9 +27,9 @@ targets:
           NSAllowsArbitraryLoads: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: app.tuner.mac
-        PRODUCT_NAME: Tuner
-        SWIFT_OBJC_BRIDGING_HEADER: Tuner/Player/Tuner-Bridging-Header.h
+        PRODUCT_BUNDLE_IDENTIFIER: app.openiptv.mac
+        PRODUCT_NAME: Open IPTV
+        SWIFT_OBJC_BRIDGING_HEADER: OpenIPTV/Player/OpenIPTV-Bridging-Header.h
         HEADER_SEARCH_PATHS: /opt/homebrew/include
         LIBRARY_SEARCH_PATHS: /opt/homebrew/lib
         OTHER_LDFLAGS: -lmpv

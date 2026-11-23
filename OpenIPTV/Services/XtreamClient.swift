@@ -18,7 +18,7 @@ let sharedSession: URLSession = {
     let c = URLSessionConfiguration.default
     c.timeoutIntervalForRequest = 30
     c.timeoutIntervalForResource = 180
-    c.httpAdditionalHeaders = ["User-Agent": "Tuner/0.1"]
+    c.httpAdditionalHeaders = ["User-Agent": "OpenIPTV/0.1"]
     return URLSession(configuration: c)
 }()
 

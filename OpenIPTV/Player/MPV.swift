@@ -14,7 +14,7 @@ final class MPV {
 
     let handle: OpaquePointer
     var onEvent: ((Event) -> Void)?
-    private let queue = DispatchQueue(label: "tuner.mpv.events")
+    private let queue = DispatchQueue(label: "openiptv.mpv.events")
 
     init() {
         handle = mpv_create()
@@ -28,7 +28,7 @@ final class MPV {
             ("ytdl", "no"),
             ("keep-open", "no"),
             ("idle", "yes"),
-            ("audio-client-name", "Tuner"),
+            ("audio-client-name", "Open IPTV"),
             // Live TV: start fast, ride out short network hiccups.
             ("cache", "yes"),
             ("cache-pause-initial", "no"),
@@ -114,7 +114,7 @@ final class MPV {
 final class MPVVideoLayer: CAOpenGLLayer {
     private let mpv: MPV
     private var renderContext: OpaquePointer?
-    private let renderQueue = DispatchQueue(label: "tuner.mpv.render", qos: .userInteractive)
+    private let renderQueue = DispatchQueue(label: "openiptv.mpv.render", qos: .userInteractive)
     private var cglContext: CGLContextObj?
 
     init(mpv: MPV) {

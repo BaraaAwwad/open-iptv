@@ -70,7 +70,7 @@ final class Navigator {
 
     private func handle(_ e: NSEvent) -> NSEvent? {
         guard isActive(), let window = e.window, window.attachedSheet == nil,
-              window.identifier?.rawValue.contains("main") == true || window.title == "Tuner",
+              window.identifier?.rawValue.contains("main") == true || window.title == "Open IPTV",
               e.modifierFlags.isDisjoint(with: [.command, .control, .option]) else { return e }
 
         let responder = window.firstResponder
