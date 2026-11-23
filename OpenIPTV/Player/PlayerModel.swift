@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Observation
 
 @MainActor @Observable
@@ -10,6 +11,16 @@ final class PlayerModel {
     @ObservationIgnored private let library: Library
     @ObservationIgnored private var epgTask: Task<Void, Never>?
     @ObservationIgnored private var timeoutTask: Task<Void, Never>?
+
+    // AirPlay: the stream is repackaged to HLS and played through AVPlayer so a TV can take it.
+    enum AirPlayState: Equatable { case off, preparing, ready, failed(String) }
+    private(set) var airPlay: AirPlayState = .off
+    /// True while a TV is actually showing the stream.
+    private(set) var isOnTV = false
+    @ObservationIgnored let airPlayer = AVPlayer()
+    @ObservationIgnored private let streamer = AirPlayStreamer()
+    @ObservationIgnored private var airPlayTask: Task<Void, Never>?
+    @ObservationIgnored private var externalObservation: NSKeyValueObservation?
 
     /// hidden → nothing playing; mini → picture in picture in a corner; full → fills the window.
     enum Mode { case hidden, mini, full }
@@ -25,10 +36,14 @@ final class PlayerModel {
     private(set) var programmes: [Programme] = []
 
     var volume: Double {
-        didSet { mpv.setVolume(volume); UserDefaults.standard.set(volume, forKey: "volume") }
+        didSet {
+            mpv.setVolume(volume)
+            airPlayer.volume = Float(min(volume, 100) / 100)
+            UserDefaults.standard.set(volume, forKey: "volume")
+        }
     }
     var isMuted = false {
-        didSet { mpv.setMute(isMuted) }
+        didSet { mpv.setMute(isMuted); airPlayer.isMuted = isMuted }
     }
 
     init(library: Library) {
@@ -36,6 +51,11 @@ final class PlayerModel {
         volume = UserDefaults.standard.object(forKey: "volume") as? Double ?? 100
         mpv.setVolume(volume)
         mpv.onEvent = { [weak self] e in self?.handle(e) }
+        airPlayer.allowsExternalPlayback = true
+        externalObservation = airPlayer.observe(\.isExternalPlaybackActive, options: [.new]) { [weak self] p, _ in
+            let active = p.isExternalPlaybackActive
+            DispatchQueue.main.async { self?.isOnTV = active }
+        }
     }
 
     /// Plays `channel`; `list` is what ↑/↓ step through.
@@ -52,10 +72,62 @@ final class PlayerModel {
         isPaused = false
         isBehindLive = false
         programmes = []
-        mpv.load(url)
-        watchForStall(channel)
         library.markWatched(channel)
         loadEPG(channel)
+        if airPlay != .off {
+            // Already on AirPlay: switch the TV to the new channel.
+            startAirPlay(url)
+            return
+        }
+        mpv.load(url)
+        watchForStall(channel)
+    }
+
+    // MARK: AirPlay
+
+    func toggleAirPlay() {
+        if airPlay == .off {
+            guard let channel, let url = library.streamURL(channel) else { return }
+            startAirPlay(url)
+        } else {
+            stopAirPlay(resumeHere: true)
+        }
+    }
+
+    private func startAirPlay(_ url: URL) {
+        // The provider allows one connection, so the Mac's own player lets go first.
+        mpv.stop()
+        timeoutTask?.cancel()
+        airPlay = .preparing
+        status = .loading
+        airPlayTask?.cancel()
+        airPlayTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let local = try await streamer.start(url)
+                guard !Task.isCancelled else { return }
+                airPlayer.replaceCurrentItem(with: AVPlayerItem(url: local))
+                airPlayer.isMuted = isMuted
+                airPlayer.volume = Float(min(volume, 100) / 100)
+                airPlayer.play()
+                airPlay = .ready
+                status = .playing
+            } catch {
+                guard !Task.isCancelled else { return }
+                airPlay = .failed(error.localizedDescription)
+                status = .playing
+            }
+        }
+    }
+
+    func stopAirPlay(resumeHere: Bool) {
+        airPlayTask?.cancel()
+        airPlayer.pause()
+        airPlayer.replaceCurrentItem(with: nil)
+        streamer.stop()
+        airPlay = .off
+        isOnTV = false
+        if resumeHere, let channel { play(channel, in: list) }
     }
 
     /// Channel up / down. Steps through the list you played from; when that list is just this channel
@@ -74,6 +146,7 @@ final class PlayerModel {
     /// Reloads the stream at the live edge (pausing or buffering a live channel leaves it behind).
     func goLive() {
         guard let channel, let url = library.streamURL(channel) else { return }
+        if airPlay != .off { startAirPlay(url); isBehindLive = false; return }
         isBehindLive = false
         status = .loading
         isPaused = false
@@ -83,6 +156,10 @@ final class PlayerModel {
 
     func togglePause() {
         guard status == .playing else { return }
+        if airPlay == .ready {
+            if airPlayer.rate == 0 { airPlayer.play(); isPaused = false } else { airPlayer.pause(); isPaused = true; isBehindLive = true }
+            return
+        }
         mpv.setPause(!isPaused)
     }
 
@@ -91,6 +168,7 @@ final class PlayerModel {
     }
 
     func close() {
+        if airPlay != .off { stopAirPlay(resumeHere: false) }
         mpv.stop()
         epgTask?.cancel()
         timeoutTask?.cancel()

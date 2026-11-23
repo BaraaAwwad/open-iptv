@@ -23,6 +23,7 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.entertainment
         NSHumanReadableCopyright: ""
+        NSLocalNetworkUsageDescription: Open IPTV shares the stream with your TV over the local network when you use AirPlay.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
     settings:
@@ -38,3 +39,4 @@ targets:
         CODE_SIGN_STYLE: Manual
         ENABLE_HARDENED_RUNTIME: NO
         COMBINE_HIDPI_IMAGES: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

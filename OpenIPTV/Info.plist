@@ -29,5 +29,7 @@
 	</dict>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Open IPTV shares the stream with your TV over the local network when you use AirPlay.</string>
 </dict>
 </plist>

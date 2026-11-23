@@ -49,24 +49,56 @@ struct HomeView: View {
     }
 
     private func shelf(_ title: String, _ channels: [Channel], _ target: SidebarItem) -> some View {
+        Shelf(title: title, channels: Array(channels.prefix(20)), target: target, selection: $selection)
+    }
+}
+
+/// A horizontal row of tiles with ‹ › buttons (not everyone knows Shift-scroll).
+private struct Shelf: View {
+    @Environment(Library.self) private var library
+    @Environment(PlayerModel.self) private var player
+    let title: String
+    let channels: [Channel]
+    let target: SidebarItem
+    @Binding var selection: SidebarItem?
+    @State private var leadingID: String?
+    @State private var width: CGFloat = 900
+
+    private let tileWidth: CGFloat = 220
+    private let spacing: CGFloat = 22
+
+    private var pageSize: Int { max(1, Int((width - 72 + spacing) / (tileWidth + spacing))) }
+    private var leadingIndex: Int { leadingID.flatMap { id in channels.firstIndex { $0.id == id } } ?? 0 }
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Button { selection = target } label: {
-                HStack(spacing: 4) {
-                    Text(title).font(.title2.weight(.bold))
-                    Image(systemName: "chevron.right").font(.title3.weight(.bold)).foregroundStyle(.secondary)
+            HStack {
+                Button { selection = target } label: {
+                    HStack(spacing: 4) {
+                        Text(title).font(.title2.weight(.bold))
+                        Image(systemName: "chevron.right").font(.title3.weight(.bold)).foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                if channels.count > pageSize {
+                    HStack(spacing: 8) {
+                        pageButton("chevron.left", enabled: leadingIndex > 0) { page(-1) }
+                        pageButton("chevron.right", enabled: leadingIndex + pageSize < channels.count) { page(1) }
+                    }
                 }
             }
-            .buttonStyle(.plain)
             .padding(.horizontal, 36)
 
             // The shelf spans the whole pane, so cards scroll on under the sidebar glass instead of vanishing.
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 22) {
+                HStack(alignment: .top, spacing: spacing) {
                     ForEach(channels.prefix(20)) { channel in
                         ShelfTile(channel: channel, isFavorite: library.isFavorite(channel)) {
                             player.play(channel, in: channels)
                         }
-                        .frame(width: 220)
+                        .frame(width: tileWidth)
+                        .id(channel.id)
                         .contextMenu {
                             Button("Play") { player.play(channel, in: channels) }
                             Divider()
@@ -75,18 +107,37 @@ struct HomeView: View {
                                     withAnimation(.easeOut(duration: 0.2)) { library.removeRecent(channel) }
                                 }
                             }
-                            Button(library.isFavorite(channel) ? "Remove from Favorites" : "Add to Favorites") {
-                                withAnimation(.easeOut(duration: 0.2)) { library.toggleFavorite(channel) }
-                            }
+                            Menu("Add to Playlist") { PlaylistMenuItems(channel: channel) }
                         }
                     }
                 }
+                .scrollTargetLayout()
                 .padding(.vertical, 6)
-                .padding(.horizontal, 36)
             }
+            .contentMargins(.horizontal, 36, for: .scrollContent)
+            .scrollPosition(id: $leadingID, anchor: .leading)
             // Hover lift and shadow spill outside the shelf instead of being cut off.
             .scrollClipDisabled()
         }
+        .onGeometryChange(for: CGFloat.self, of: \.size.width) { width = $0 }
+    }
+
+    private func page(_ direction: Int) {
+        let target = min(max(leadingIndex + direction * pageSize, 0), max(0, channels.count - pageSize))
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { leadingID = channels[target].id }
+    }
+
+    private func pageButton(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .bold))
+                .frame(width: 28, height: 28)
+                .background(Color.primary.opacity(0.08), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressScale())
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.35)
     }
 }
 

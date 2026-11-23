@@ -60,7 +60,7 @@ struct PlayerScreen: View {
     var body: some View {
         ZStack {
             Color.black
-            VideoSurface(view: player.videoView)
+            PlayerVideo(active: true)
             // Double-click to toggle full screen; kept behind the controls so it never delays their clicks.
             Color.clear
                 .contentShape(Rectangle())
@@ -73,7 +73,11 @@ struct PlayerScreen: View {
                     .transition(.opacity)
             }
 
-            statusOverlay
+            if player.airPlay != .off {
+                AirPlayCard()
+            } else {
+                statusOverlay
+            }
 
             if controlsVisible {
                 VStack(spacing: 0) {
@@ -185,6 +189,8 @@ struct PlayerScreen: View {
                     .controlSize(.small)
                     .tint(.white)
                 capsuleButton(volumeIcon, help: "Mute (M)") { player.isMuted.toggle() }
+                capsuleButton("airplayvideo", help: player.airPlay == .off ? "AirPlay to a TV" : "Stop AirPlay") { player.toggleAirPlay() }
+                    .foregroundStyle(player.airPlay == .off ? .white : .blue)
             }
             .padding(.leading, 16)
             .padding(4)
@@ -214,14 +220,7 @@ struct PlayerScreen: View {
                     }
                     Spacer()
                     LivePill { player.goLive(); showControls() }
-                    HStack(spacing: 2) {
-                        capsuleButton(library.isFavorite(channel) ? "star.fill" : "star", help: "Favorite (S)") {
-                            library.toggleFavorite(channel)
-                        }
-                        .foregroundStyle(library.isFavorite(channel) ? .yellow : .white)
-                    }
-                    .padding(4)
-                    .glassCapsule()
+                    AddToPlaylistButton(channel: channel, size: 40)
                 }
             }
         }
@@ -376,5 +375,66 @@ struct LivePill: View {
         .disabled(!behind)
         .help(behind ? "Jump back to live" : "Watching live")
         .animation(.easeInOut(duration: 0.2), value: behind)
+    }
+}
+
+/// The picture: mpv normally, AVPlayer while AirPlay is on.
+struct PlayerVideo: View {
+    @Environment(PlayerModel.self) private var player
+    let active: Bool
+
+    var body: some View {
+        if player.airPlay == .ready {
+            AirPlayVideo(player: player.airPlayer)
+        } else {
+            VideoSurface(view: player.videoView, active: active)
+        }
+    }
+}
+
+/// Center card while AirPlay is on: getting ready, pick a TV, playing on the TV, or what went wrong.
+struct AirPlayCard: View {
+    @Environment(PlayerModel.self) private var player
+    var compact = false
+
+    var body: some View {
+        VStack(spacing: compact ? 8 : 14) {
+            switch player.airPlay {
+            case .off:
+                EmptyView()
+            case .preparing:
+                ProgressView().tint(.white).controlSize(compact ? .small : .regular)
+                Text("Getting the stream ready for AirPlay…").font(compact ? .caption : .callout)
+            case .ready where player.isOnTV:
+                Image(systemName: "airplayvideo").font(.system(size: compact ? 22 : 40, weight: .light))
+                Text("Playing on your TV").font(compact ? .caption.weight(.semibold) : .title3.weight(.semibold))
+                if !compact { stopButton }
+            case .ready:
+                RoutePicker(player: player.airPlayer, openOnAppear: true)
+                    .frame(width: compact ? 30 : 44, height: compact ? 30 : 44)
+                Text("Choose a TV").font(compact ? .caption.weight(.semibold) : .title3.weight(.semibold))
+                if !compact { stopButton }
+            case .failed(let message):
+                Image(systemName: "exclamationmark.triangle").font(.system(size: compact ? 20 : 32, weight: .light))
+                Text(message).font(compact ? .caption : .callout).multilineTextAlignment(.center).frame(maxWidth: 360)
+                Button("Back to this Mac") { player.stopAirPlay(resumeHere: true) }
+                    .buttonStyle(PressScale())
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .glassCapsule()
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(compact ? 12 : 26)
+        .background(.black.opacity(player.isOnTV ? 0 : 0.35), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var stopButton: some View {
+        Button { player.stopAirPlay(resumeHere: true) } label: {
+            Label("Stop AirPlay", systemImage: "xmark")
+                .font(.callout.weight(.semibold))
+                .padding(.horizontal, 16).padding(.vertical, 8)
+                .glassCapsule()
+        }
+        .buttonStyle(PressScale())
     }
 }

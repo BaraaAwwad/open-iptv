@@ -60,6 +60,9 @@ struct RootView: View {
             }
         }
         .animation(.spring(response: 0.32, dampingFraction: 0.85), value: player.mode)
+        .sheet(item: Binding(get: { library.newPlaylistRequest }, set: { library.newPlaylistRequest = $0 })) { request in
+            PlaylistNameSheet(request: request)
+        }
         .task { await library.load() }
     }
 }

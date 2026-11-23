@@ -57,12 +57,16 @@ struct MiniPlayer: View {
     private var card: some View {
         ZStack {
             Color.black
-            VideoSurface(view: player.videoView, active: player.mode == .mini)
+            PlayerVideo(active: player.mode == .mini)
             Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) { player.mode = .full }
 
-            statusOverlay
+            if player.airPlay != .off {
+                AirPlayCard(compact: true)
+            } else {
+                statusOverlay
+            }
 
             if hovering {
                 controls.transition(.opacity)
@@ -107,6 +111,7 @@ struct MiniPlayer: View {
                 HStack {
                     circle("xmark", 28, help: "Stop and close") { player.close() }
                     Spacer()
+                    circle("airplayvideo", 28, help: player.airPlay == .off ? "AirPlay to a TV" : "Stop AirPlay") { player.toggleAirPlay() }
                     circle("arrow.up.left.and.arrow.down.right", 28, help: "Expand (double-click)") { player.mode = .full }
                 }
                 Spacer()
@@ -117,6 +122,7 @@ struct MiniPlayer: View {
                         .lineLimit(1)
                     Spacer()
                     LivePill(compact: true) { player.goLive() }
+                    if let channel = player.channel { AddToPlaylistButton(channel: channel, size: 28) }
                     circle(player.isMuted || player.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill", 28, help: "Mute") {
                         player.isMuted.toggle()
                     }

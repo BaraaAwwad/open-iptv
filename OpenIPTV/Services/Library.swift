@@ -17,6 +17,15 @@ final class Library {
     @ObservationIgnored private var displayKeys: [String] = []
 
     private(set) var favorites: [String] = []
+    private(set) var playlists: [UserPlaylist] = []
+    /// Set to ask for a new playlist's name (optionally adding this channel to it).
+    var newPlaylistRequest: NewPlaylistRequest?
+    struct NewPlaylistRequest: Identifiable {
+        let id = UUID()
+        var channel: Channel? = nil
+        /// When set, the sheet renames this playlist instead of creating one.
+        var renaming: UUID? = nil
+    }
     private(set) var recents: [String] = []
 
     private(set) var isLoading = false
@@ -88,6 +97,8 @@ final class Library {
     func load() async {
         guard let source = active else { return }
         favorites = UserDefaults.standard.stringArray(forKey: "fav-\(source.id)") ?? []
+        playlists = UserDefaults.standard.data(forKey: "playlists-\(source.id)")
+            .flatMap { try? JSONDecoder().decode([UserPlaylist].self, from: $0) } ?? []
         recents = UserDefaults.standard.stringArray(forKey: "recent-\(source.id)") ?? []
         let file = Self.cacheFile(source.id)
         let cached = await Task.detached(priority: .userInitiated) { () -> Catalog? in
@@ -160,7 +171,7 @@ final class Library {
 
     func channels(for item: SidebarItem) -> [Channel] {
         switch item {
-        case .home: []
+        case .home, .playlists: []
         case .all: channels
         case .favorites: favorites.compactMap { byID[$0] }
         case .recents: recents.compactMap { byID[$0] }
@@ -171,6 +182,7 @@ final class Library {
     func title(for item: SidebarItem) -> String {
         switch item {
         case .home: "Home"
+        case .playlists: "My Playlists"
         case .all: "All Channels"
         case .favorites: "Favorites"
         case .recents: "Recently Watched"
@@ -181,6 +193,70 @@ final class Library {
     func groupName(_ id: String) -> String { groups.first { $0.id == id }?.name ?? "" }
 
     func isFavorite(_ c: Channel) -> Bool { favorites.contains(c.id) }
+
+    // MARK: My Playlists
+
+    func channels(in ref: PlaylistRef) -> [Channel] {
+        switch ref {
+        case .favorites: favorites.compactMap { byID[$0] }
+        case .custom(let id): (playlists.first { $0.id == id }?.channelIDs ?? []).compactMap { byID[$0] }
+        }
+    }
+
+    func name(of ref: PlaylistRef) -> String {
+        switch ref {
+        case .favorites: "Favorites"
+        case .custom(let id): playlists.first { $0.id == id }?.name ?? ""
+        }
+    }
+
+    func contains(_ c: Channel, in ref: PlaylistRef) -> Bool {
+        switch ref {
+        case .favorites: favorites.contains(c.id)
+        case .custom(let id): playlists.first { $0.id == id }?.channelIDs.contains(c.id) ?? false
+        }
+    }
+
+    /// Adds the channel, or removes it if it's already there.
+    func toggle(_ c: Channel, in ref: PlaylistRef) {
+        switch ref {
+        case .favorites: toggleFavorite(c)
+        case .custom(let id):
+            guard let i = playlists.firstIndex(where: { $0.id == id }) else { return }
+            if let j = playlists[i].channelIDs.firstIndex(of: c.id) {
+                playlists[i].channelIDs.remove(at: j)
+            } else {
+                playlists[i].channelIDs.append(c.id)
+            }
+            savePlaylists()
+        }
+    }
+
+    @discardableResult
+    func createPlaylist(_ name: String, with channel: Channel? = nil) -> UUID {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        var p = UserPlaylist(name: trimmed.isEmpty ? "New Playlist" : trimmed)
+        if let channel { p.channelIDs = [channel.id] }
+        playlists.append(p)
+        savePlaylists()
+        return p.id
+    }
+
+    func renamePlaylist(_ id: UUID, to name: String) {
+        guard let i = playlists.firstIndex(where: { $0.id == id }), !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        playlists[i].name = name.trimmingCharacters(in: .whitespaces)
+        savePlaylists()
+    }
+
+    func deletePlaylist(_ id: UUID) {
+        playlists.removeAll { $0.id == id }
+        savePlaylists()
+    }
+
+    private func savePlaylists() {
+        guard let s = active, let data = try? JSONEncoder().encode(playlists) else { return }
+        UserDefaults.standard.set(data, forKey: "playlists-\(s.id)")
+    }
 
     func toggleFavorite(_ c: Channel) {
         guard let s = active else { return }

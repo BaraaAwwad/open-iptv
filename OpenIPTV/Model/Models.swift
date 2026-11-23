@@ -85,7 +85,7 @@ struct Programme: Hashable {
 }
 
 enum SidebarItem: Hashable {
-    case home, all, favorites, recents
+    case home, all, playlists, favorites, recents
     case group(String)
 }
 
@@ -120,4 +120,16 @@ extension String {
         "KIDS", "BIG", "OLD", "DAY", "WAR", "SEA", "SUN", "CAR", "LAW", "ZEE", "GEO", "BIO",
     ]
     private static let specialWords: [String: String] = ["BEIN": "beIN", "BEINSPORT": "beINSport", "PLUS": "Plus"]
+}
+
+/// A list the user made ("My Playlists"). Favorites is a built-in one that always comes first.
+struct UserPlaylist: Codable, Identifiable, Hashable {
+    var id = UUID()
+    var name: String
+    var channelIDs: [String] = []
+}
+
+enum PlaylistRef: Hashable {
+    case favorites
+    case custom(UUID)
 }

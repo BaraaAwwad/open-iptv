@@ -98,9 +98,7 @@ struct ChannelBrowser: View {
 
     @ViewBuilder private func menu(_ channel: Channel) -> some View {
         Button("Play") { play(channel) }
-        Button(library.isFavorite(channel) ? "Remove from Favorites" : "Add to Favorites") {
-            library.toggleFavorite(channel)
-        }
+        Menu("Add to Playlist") { PlaylistMenuItems(channel: channel) }
         if library.isRecent(channel) {
             Button("Remove from Recently Watched") { library.removeRecent(channel) }
         }

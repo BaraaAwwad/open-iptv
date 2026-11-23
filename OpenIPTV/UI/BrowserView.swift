@@ -14,28 +14,46 @@ struct BrowserView: View {
     @State private var query = ""
     @State private var expanded: Set<String> = []
     @State private var nav = Navigator()
+    @State private var playlistRef: PlaylistRef? = .favorites
 
     private var item: SidebarItem { selection ?? .home }
     private var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
-        let shown = isSearching ? library.search(query) : library.channels(for: item)
+        let shown = isSearching ? library.search(query)
+            : item == .playlists ? library.channels(in: playlistRef ?? .favorites)
+            : library.channels(for: item)
         NavigationSplitView {
             Sidebar(selection: $selection, expanded: $expanded)
                 .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 320)
         } detail: {
             if item == .home && !isSearching {
                 HomeView(selection: $selection, nav: nav)
+            } else if item == .playlists && !isSearching {
+                // Playlists on the left, that playlist's channels on the right, in one view.
+                HStack(spacing: 0) {
+                    PlaylistsPane(selection: $playlistRef)
+                    Divider()
+                    ChannelBrowser(
+                        channels: shown,
+                        title: library.name(of: playlistRef ?? .favorites),
+                        emptyMessage: "Add channels with the + button in the player, or right-click any channel.",
+                        scrollID: "playlist-\(String(describing: playlistRef))",
+                        showGroup: true,
+                        mode: viewMode,
+                        nav: nav
+                    )
+                }
             } else {
-            ChannelBrowser(
-                channels: shown,
-                title: isSearching ? "Results" : library.title(for: item).titleCased,
-                emptyMessage: emptyMessage,
-                scrollID: isSearching ? "search" : "\(item)",
-                showGroup: isSearching || !isGroup,
-                mode: viewMode,
-                nav: nav
-            )
+                ChannelBrowser(
+                    channels: shown,
+                    title: isSearching ? "Results" : library.title(for: item).titleCased,
+                    emptyMessage: emptyMessage,
+                    scrollID: isSearching ? "search" : "\(item)",
+                    showGroup: isSearching || !isGroup,
+                    mode: viewMode,
+                    nav: nav
+                )
             }
         }
         .searchable(text: $query, placement: .toolbar, prompt: "Search channels")
@@ -62,7 +80,7 @@ struct BrowserView: View {
             nav.setQuery = { query = $0 }
             nav.install()
         }
-        .onChange(of: "\(query)|\(item)|\(library.channels.count)|\(library.favorites.count)", initial: true) {
+        .onChange(of: "\(query)|\(item)|\(library.channels.count)|\(library.favorites.count)|\(String(describing: playlistRef))|\(library.playlists.map(\.channelIDs.count))", initial: true) {
             nav.setItems(shown, focusFirst: isSearching)
         }
         .onChange(of: player.channel?.id) { _, id in
@@ -107,9 +125,9 @@ struct Sidebar: View {
             Section {
                 row("Home", "house", .home, nil)
                 row("All Channels", "square.grid.2x2", .all, library.channels.count)
+                row("My Playlists", "music.note.list", .playlists, library.playlists.count + 1)
             }
             Section("Library") {
-                row("Favorites", "star", .favorites, library.favorites.count)
                 row("Recently Watched", "clock", .recents, nil)
             }
             if !library.sections.isEmpty {
