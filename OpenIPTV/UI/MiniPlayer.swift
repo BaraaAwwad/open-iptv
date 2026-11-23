@@ -6,8 +6,6 @@ struct MiniPlayer: View {
     @Environment(PlayerModel.self) private var player
     @State private var drag: CGSize = .zero
     @State private var hovering = false
-    @State private var overGrip = false
-    @State private var unhover = HideTimer()
     /// Width at the start of a resize drag.
     @State private var resizeStart: Double?
     @State private var available: CGSize = .zero
@@ -50,50 +48,55 @@ struct MiniPlayer: View {
         }
     }
 
-    /// The resize grip sits on the corner facing into the window (opposite the docked corner).
-    private var gripAlignment: Alignment {
-        switch corner {
-        case .topTrailing: .bottomLeading
-        case .topLeading: .bottomTrailing
-        case .bottomTrailing: .topLeading
-        case .bottomLeading: .topTrailing
+    // MARK: Resizing, like a window: drag the inner edges or corner with the system resize cursor.
+
+    private var dockedLeading: Bool { corner == .topLeading || corner == .bottomLeading }
+    private var dockedTop: Bool { corner == .topLeading || corner == .topTrailing }
+
+    /// Invisible edge strips and a corner square on the sides facing into the window.
+    private var resizeZones: some View {
+        let edge: CGFloat = 7, cornerSize: CGFloat = 16
+        let side: HorizontalEdge = dockedLeading ? .trailing : .leading
+        let vertical: VerticalEdge = dockedTop ? .bottom : .top
+        return ZStack {
+            // Inward vertical edge.
+            Color.clear
+                .frame(width: edge)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: side == .leading ? .leading : .trailing)
+                .resizeHandle(position: side == .leading ? .leading : .trailing, axis: .horizontal, resize: resize)
+            // Inward horizontal edge.
+            Color.clear
+                .frame(height: edge)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: vertical == .top ? .top : .bottom)
+                .resizeHandle(position: vertical == .top ? .top : .bottom, axis: .vertical, resize: resize)
+            // Inward corner.
+            Color.clear
+                .frame(width: cornerSize, height: cornerSize)
+                .frame(maxWidth: .infinity, maxHeight: .infinity,
+                       alignment: Alignment(horizontal: side == .leading ? .leading : .trailing,
+                                            vertical: vertical == .top ? .top : .bottom))
+                .resizeHandle(position: cornerPosition, axis: [.horizontal, .vertical], resize: resize)
         }
     }
 
-    private var grip: some View {
-        let leading = corner == .topLeading || corner == .bottomLeading
-        let top = corner == .topLeading || corner == .topTrailing
-        // Arrow pointing out of the card, into the window.
-        let symbol = top ? (leading ? "arrow.down.right" : "arrow.down.left") : (leading ? "arrow.up.right" : "arrow.up.left")
-        return Image(systemName: symbol)
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(width: 26, height: 26)
-            .glassCircle()
-            .contentShape(Rectangle().inset(by: -8))
-            .highPriorityGesture(
-                DragGesture(minimumDistance: 1)
-                    .onChanged { v in
-                        let start = resizeStart ?? player.pipWidth
-                        resizeStart = start
-                        // Docked right → dragging left grows it; docked left → dragging right grows it.
-                        let dx = leading ? v.translation.width : -v.translation.width
-                        let dy = top ? v.translation.height : -v.translation.height
-                        let grow = max(dx, dy * 16 / 9)
-                        player.pipWidth = Double(min(max(start + grow, 260), Double(maxWidth)))
-                    }
-                    .onEnded { _ in
-                        resizeStart = nil
-                        if !overGrip { unhover.schedule(after: 0.7) { hovering = false } }
-                    }
-            )
-            .onHover { inside in
-                overGrip = inside
-                if inside { unhover.cancel() } else if resizeStart == nil {
-                    unhover.schedule(after: 0.7) { hovering = false }
-                }
-            }
-            .help("Drag to resize")
+    private var cornerPosition: FrameResizePosition {
+        switch (dockedTop, dockedLeading) {
+        case (true, false): .bottomLeading
+        case (true, true): .bottomTrailing
+        case (false, false): .topLeading
+        case (false, true): .topTrailing
+        }
+    }
+
+    /// Dragging away from the docked corner grows it; the picture stays 16:9.
+    private func resize(_ translation: CGSize, _ axis: Axis.Set, _ ended: Bool) {
+        if ended { resizeStart = nil; return }
+        let start = resizeStart ?? player.pipWidth
+        resizeStart = start
+        let dx = dockedLeading ? translation.width : -translation.width
+        let dy = (dockedTop ? translation.height : -translation.height) * 16 / 9
+        let grow = axis == .horizontal ? dx : axis == .vertical ? dy : max(dx, dy)
+        player.pipWidth = Double(min(max(start + grow, 260), Double(maxWidth)))
     }
 
     private func snap(_ value: DragGesture.Value, in size: CGSize) {
@@ -139,20 +142,9 @@ struct MiniPlayer: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.14))
         }
         .shadow(color: .black.opacity(0.45), radius: 24, y: 12)
-        // Outside the clip, poking out of the inner corner, so it never covers the controls.
-        .overlay(alignment: gripAlignment) {
-            if hovering || resizeStart != nil {
-                let leading = corner == .topLeading || corner == .bottomLeading
-                let top = corner == .topLeading || corner == .topTrailing
-                grip.offset(x: leading ? 21 : -21, y: top ? 21 : -21).transition(.opacity)
-            }
-        }
+        .overlay { resizeZones }
         .environment(\.colorScheme, .dark)
-        .onHover { inside in
-            // Linger a moment after the mouse leaves, so it can reach the resize grip outside the card.
-            if inside { unhover.cancel(); hovering = true }
-            else { unhover.schedule(after: 0.7) { if !overGrip { hovering = false } } }
-        }
+        .onHover { hovering = $0 }
         .animation(.easeInOut(duration: 0.18), value: hovering)
     }
 
@@ -242,5 +234,19 @@ struct MiniPlayer: View {
                 .glassCapsule()
         }
         .buttonStyle(PressScale())
+    }
+}
+
+private extension View {
+    /// A native resize edge: the system resize cursor on hover, and a drag that reports its translation.
+    func resizeHandle(position: FrameResizePosition, axis: Axis.Set,
+                      resize: @escaping (CGSize, Axis.Set, Bool) -> Void) -> some View {
+        contentShape(Rectangle())
+            .pointerStyle(.frameResize(position: position))
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { resize($0.translation, axis, false) }
+                    .onEnded { _ in resize(.zero, axis, true) }
+            )
     }
 }
