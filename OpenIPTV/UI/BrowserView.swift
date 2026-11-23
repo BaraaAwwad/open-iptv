@@ -81,20 +81,44 @@ struct BrowserView: View {
                 // One filter button: channel quality on channel pages; quality + language on Movies / Series.
                 Menu {
                     if isVODPage {
-                        Picker("Quality", selection: $vodQuality) {
-                            Text("All Qualities").tag(String?.none)
-                            Divider()
-                            ForEach(["4K", "1080p", "720p", "SD"], id: \.self) { Text($0).tag(String?.some($0)) }
+                        // Submenus keep the menu short; the long language list is split once more.
+                        Menu("Quality: \(vodQuality ?? "All")") {
+                            Picker("Quality", selection: $vodQuality) {
+                                Text("All Qualities").tag(String?.none)
+                                Divider()
+                                ForEach(["4K", "1080p", "720p", "SD"], id: \.self) { Text($0).tag(String?.some($0)) }
+                            }
+                            .pickerStyle(.inline)
+                            .labelsHidden()
                         }
-                        .pickerStyle(.inline)
-                        Picker("Language", selection: $vodLanguage) {
-                            Text("All Languages").tag("")
-                            Divider()
-                            ForEach(VODBrowser.languages(item == .movies ? vod.movieCategories : vod.seriesCategories), id: \.tag) { l in
-                                Text("\(l.tag) (\(l.count))").tag(l.tag)
+                        let langs = VODBrowser.languages(item == .movies ? vod.movieCategories : vod.seriesCategories)
+                        Menu("Language: \(vodLanguage.isEmpty ? "All" : VODBrowser.languageName(vodLanguage))") {
+                            Picker("Language", selection: $vodLanguage) {
+                                Text("All Languages").tag("")
+                                Divider()
+                                ForEach(langs.prefix(12), id: \.tag) { l in
+                                    Text("\(VODBrowser.languageName(l.tag)) (\(l.count))").tag(l.tag)
+                                }
+                            }
+                            .pickerStyle(.inline)
+                            .labelsHidden()
+                            if langs.count > 12 {
+                                Divider()
+                                Menu("More Languages") {
+                                    Picker("More Languages", selection: $vodLanguage) {
+                                        ForEach(langs.dropFirst(12), id: \.tag) { l in
+                                            Text("\(VODBrowser.languageName(l.tag)) (\(l.count))").tag(l.tag)
+                                        }
+                                    }
+                                    .pickerStyle(.inline)
+                                    .labelsHidden()
+                                }
                             }
                         }
-                        .pickerStyle(.inline)
+                        if filterActive {
+                            Divider()
+                            Button("Clear Filters") { vodQuality = nil; vodLanguage = "" }
+                        }
                     } else {
                         Picker("Quality", selection: $qualityFilter) {
                             Text("All Qualities").tag(QualityTier?.none)
@@ -161,7 +185,10 @@ struct BrowserView: View {
     private var isVODPage: Bool { !isSearching && (item == .movies || item == .series) }
     private var filterActive: Bool { isVODPage ? (vodQuality != nil || !vodLanguage.isEmpty) : qualityFilter != nil }
     private var filterLabel: String {
-        if isVODPage { return [vodQuality, vodLanguage.isEmpty ? nil : vodLanguage].compactMap { $0 }.joined(separator: " · ").nilIfEmpty ?? "Filter" }
+        if isVODPage {
+            return [vodQuality, vodLanguage.isEmpty ? nil : VODBrowser.languageName(vodLanguage)]
+                .compactMap { $0 }.joined(separator: " · ").nilIfEmpty ?? "Filter"
+        }
         return qualityFilter?.rawValue ?? "Quality"
     }
 

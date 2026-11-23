@@ -20,6 +20,20 @@ struct VODBrowser: View {
         language.isEmpty ? allCategories : allCategories.filter { VODBrowser.languageTag($0.name) == language }
     }
 
+    /// "NL" → "Dutch"; unknown tags stay as they are ("MULTI", "AR-SUB" → "Arabic subtitles").
+    static func languageName(_ tag: String) -> String {
+        let names = ["EN": "English", "FR": "French", "NL": "Dutch", "TR": "Turkish", "DE": "German", "IT": "Italian",
+                     "ES": "Spanish", "PL": "Polish", "PT": "Portuguese", "ALB": "Albanian", "GR": "Greek", "AR": "Arabic",
+                     "AR-SUB": "Arabic subtitles", "IN": "Indian", "RU": "Russian", "TL": "Tagalog", "ML": "Malayalam",
+                     "TA": "Tamil", "KA": "Kannada", "SCAN": "Scandinavian", "IR": "Persian", "CZ": "Czech", "CN": "Chinese",
+                     "PK": "Pakistani", "BG": "Bulgarian", "PH": "Filipino", "EXYU": "Ex-Yugoslav", "KR": "Korean",
+                     "AF": "African", "SO": "Somali", "TH": "Thai", "SRB": "Serbian", "BN": "Bengali", "MT": "Maltese",
+                     "DK": "Danish", "NO": "Norwegian", "RO": "Romanian", "SW": "Swedish", "SE": "Swedish", "PJ": "Punjabi",
+                     "GJ": "Gujarati", "MH": "Marathi", "MA": "Moroccan", "HU": "Hungarian", "FI": "Finnish", "HE": "Hebrew",
+                     "JP": "Japanese", "UK": "British", "US": "American", "LAT": "Latino", "MULTI": "Multi-language"]
+        return names[tag] ?? tag
+    }
+
     /// Languages present in category names, most common first (for the toolbar filter).
     static func languages(_ categories: [VODCategory]) -> [(tag: String, count: Int)] {
         var counts: [String: Int] = [:]
