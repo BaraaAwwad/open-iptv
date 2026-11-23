@@ -1,0 +1,22 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools
+        run: brew install mpv xcodegen
+      - name: Build
+        run: |
+          xcodegen generate
+          xcodebuild -project OpenIPTV.xcodeproj -scheme OpenIPTV -configuration Debug \
+            -derivedDataPath build -destination 'platform=macOS' ARCHS=arm64 build | tail -5
+      - name: No secrets or stream credentials committed
+        run: |
+          ! git grep -nE '(username|password)=[A-Za-z0-9]{8,}|player_api\.php\?username=' -- ':!README.md' ':!.github'

@@ -1,70 +1,97 @@
-# Open IPTV
+<p align="center">
+  <img src="docs/icon.png" width="128" alt="Open IPTV icon">
+</p>
 
-A fast, native macOS IPTV player. Add an **Xtream Codes** account or an **M3U** playlist and get your channels in a clean, Apple TV–style grid, with instant search and a player that shows the picture and nothing else.
+<h1 align="center">Open IPTV</h1>
 
-- **Native:** SwiftUI and [libmpv](https://mpv.io), with hardware decoding through VideoToolbox. It plays MPEG-TS and HLS.
-- **Fast with big lists:** tested with 13,000 channels. The catalog is cached on disk, so launch is instant, and it refreshes in the background every 12 hours (or with ⌘R).
-- **Organized:** provider categories are grouped by prefix (`ARABIC …`, `EU …`, …), filler "channels" like `===== SPORTS =====` are hidden, and country tags like `|UK|` are stripped from tile names.
-- **Search:** results update as you type, ignore case and accents, and list names that start with your query first. Press Return to play the top result.
-- **Home:** Continue Watching and Favorites shelves, then every category as a card.
-- **Movies & Series:** your provider's on-demand library with posters, backdrops, plot, cast, director, genre, runtime and the file's real resolution / HDR / codecs. Series have seasons and episode lists. Playback has a scrubber, ±10 s skip and resume.
-- **My Playlists:** make your own lists of channels (Favorites is always first). Add channels with the + button in the player or by right-clicking any channel. Playlists sit on the left and their channels on the right, so switching is instant.
-- **AirPlay:** send any channel to an Apple TV or AirPlay TV. Your provider's stream is repackaged to HLS on the fly (needs `ffmpeg`, which comes with `brew install mpv`).
-- **Picture in picture:** channels start in a floating player you can drag to any corner, then expand to fill the window.
-- **Grid or list:** big logo tiles, or a compact list when the name matters more than the logo.
-- **Player:** glass controls appear only when the mouse moves and fade about a second after it stops. If the guide has data, the channel's now / next shows there.
+<p align="center">
+  A fast, native macOS player for your IPTV subscription.<br>
+  Xtream Codes or M3U · live TV, movies and series · an Apple TV–style interface · a player that shows the picture and nothing else.
+</p>
 
-## Keys (browsing)
+<p align="center">
+  <a href="https://github.com/BaraaAwwad/open-iptv/releases/latest"><b>Download for Mac</b></a> ·
+  <a href="#features">Features</a> ·
+  <a href="#keyboard">Keyboard</a> ·
+  <a href="#build-from-source">Build from source</a> ·
+  <a href="SECURITY.md">Security</a>
+</p>
 
-| Key | Action |
-| --- | --- |
-| Arrows | Move between channels (→ from the sidebar enters the grid, ← at the edge goes back) |
-| Return | Play the highlighted channel |
-| Just type | Search; Backspace edits, Esc clears |
-| ⌘1 / ⌘2 | Grid or list view |
-| ⌘R | Refresh the channel list |
+![Movies](docs/movies.jpg)
 
-## Keys (while playing)
+![A movie page](docs/movie.jpg)
 
-| Key | Action |
-| --- | --- |
-| ↑ / ↓ | Previous / next channel in the current list |
-| ← / → | Volume |
-| Space | Pause |
-| M | Mute |
-| F or double-click | Full screen |
-| S | Favorite |
-| Esc | Leave full screen, then back to channels |
+## Download
 
-## Build
+1. Download the latest **`Open-IPTV-x.y.z.dmg`** from [Releases](https://github.com/BaraaAwwad/open-iptv/releases/latest) and drag **Open IPTV** to Applications.
+2. The first time, **right-click the app → Open → Open**. Builds are signed but not yet notarized by Apple, so macOS asks once.
+3. Add your provider: an Xtream Codes server + username + password, or an M3U playlist URL.
 
-Requires macOS 15+, Xcode 16+, and Homebrew.
+Requires macOS 15 or later on Apple silicon (M1 or newer). Everything the player needs is inside the app.
+Optional: `brew install ffmpeg` enables AirPlay to TVs and the quality checks.
+
+Verify a download against `SHA256SUMS.txt` on the release page:
+
+```bash
+shasum -a 256 -c SHA256SUMS.txt
+```
+
+## Features
+
+**Live TV**
+- Thousands of channels load instantly (cached on disk, refreshed in the background every 12 hours or with ⌘R).
+- Categories grouped by country / prefix, filler "channels" hidden, `|UK|`-style tags removed, ALL-CAPS names title-cased.
+- Grid or list view, arrow-key navigation, type anywhere to search.
+- **Measured quality**, never guessed from names: channels you watch are measured automatically, and **Check Quality** scans a category one channel at a time, only while nothing is playing.
+
+**Movies & Series**
+- Your provider's on-demand library with posters, backdrops, plot, cast, runtime and the file's real resolution, HDR, codecs and bitrate.
+- Optional online details from [Cinemeta](https://v3-cinemeta.strem.io), the public catalogue Stremio uses: title logos, IMDb ratings, awards, trailers, and episode stills, names and summaries. No account needed; turn it off in Settings.
+- Filters (toolbar): quality and language. Continue Watching with resume, Latest Movies and Latest Series on Home.
+
+**Player** (mpv with hardware decoding)
+- Picture in picture: a small native window you can resize and move. **Real** macOS full screen.
+- Live: channel up / down, a LIVE badge that turns into **Go Live** after a pause or stall, now / next from the guide.
+- On demand: scrubber, ±10 s skip, resume where you left off.
+- **AirPlay** to Apple TV and AirPlay TVs (the stream is repackaged to HLS on the fly).
+- **Stream Info** (I): resolution, codecs, frame rate, bitrate, colour / HDR, buffer, download speed, dropped frames.
+- Handles providers that allow one connection at a time: channel switching waits until you settle, reconnects are capped, and a refused stream is retried once.
+
+**Everything else**
+- Search across channels, movies and series at once.
+- My Playlists: Favorites plus your own lists, bulk add and remove with Select.
+
+## Keyboard
+
+| Where | Key | Action |
+| --- | --- | --- |
+| Browsing | Arrows, Return | Move, play |
+| Browsing | Just type | Search (Backspace edits, Esc clears) |
+| Browsing | ⌘1 / ⌘2 | Grid / list |
+| Anywhere | ⌘↩ | Full screen ↔ picture in picture |
+| Anywhere | ⌘. | Stop |
+| Anywhere | ⌘↑ / ⌘↓ | Previous / next channel |
+| Anywhere | ⌘L | Go Live |
+| Full screen | Space, M, I, S | Pause, mute, stream info, favorite |
+| Full screen | ↑ / ↓ · ← / → | Channel (live) or volume (movies) · volume (live) or ±10 s (movies) |
+| Full screen | Esc | Back to picture in picture |
+
+## Privacy
+
+- Your playlists and logins stay on your Mac, in `~/Library/Application Support/Open IPTV/sources.json` (readable only by you). Nothing is sent anywhere except to your provider.
+- Stream addresses contain your password, so they are never written to caches or logs. The diagnostics log (`~/Library/Logs/Open IPTV/player.log`) records channel ids only.
+- With online info on, only the title you open is looked up on Cinemeta.
+
+## Build from source
 
 ```bash
 brew install mpv xcodegen
 xcodegen generate
-open OpenIPTV.xcodeproj
+open OpenIPTV.xcodeproj          # or: scripts/install.sh  (Release build into /Applications)
 ```
 
-Or build an optimized copy into /Applications:
-
-```bash
-scripts/install.sh
-```
-
-Or from the command line:
-
-```bash
-xcodebuild -project OpenIPTV.xcodeproj -scheme OpenIPTV -configuration Release -derivedDataPath build build
-open build/Build/Products/Release/Open\ IPTV.app
-```
-
-The app links Homebrew's `libmpv` from `/opt/homebrew/lib`. A self-contained build that bundles mpv is on the to-do list.
-
-## Privacy
-
-Playlists, including Xtream credentials, are stored only on your Mac in `~/Library/Application Support/Open IPTV/sources.json` (readable only by you). The channel cache next to it never contains your password: stream URLs are built when you press play.
+`scripts/release.sh <version>` produces the self-contained download (libmpv and its libraries bundled, signed, DMG + ZIP + checksums). With a Developer ID certificate and an App Store Connect API key in `NOTARY_KEY_PATH` / `NOTARY_KEY_ID` / `NOTARY_ISSUER`, it also notarizes.
 
 ## License
 
-MIT
+[MIT](LICENSE). Open IPTV is a player only: it ships no channels, playlists or content. Use it with a subscription you're entitled to.

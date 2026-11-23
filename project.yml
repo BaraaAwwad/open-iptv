@@ -38,5 +38,11 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
         ENABLE_HARDENED_RUNTIME: NO
+        DEVELOPMENT_TEAM: 77RQT253K3
         COMBINE_HIDPI_IMAGES: YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Release:
+          # Shipped builds: hardened runtime (required for notarization); Xcode signs with Developer ID on export.
+          ENABLE_HARDENED_RUNTIME: YES
+          CODE_SIGN_ENTITLEMENTS: OpenIPTV/OpenIPTV.entitlements
