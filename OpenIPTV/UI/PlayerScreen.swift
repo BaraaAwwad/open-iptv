@@ -135,7 +135,7 @@ struct PlayerScreen: View {
                 Text(message).font(.title3.weight(.medium))
                 HStack(spacing: 10) {
                     pill("Try Again", "arrow.clockwise") { player.retry() }
-                    pill("Next Channel", "forward.end.fill") { player.step(1) }
+                    pill("Next Channel", "chevron.down") { player.step(1) }
                 }
             }
             .foregroundStyle(.white.opacity(0.9))
@@ -153,11 +153,11 @@ struct PlayerScreen: View {
         HStack(spacing: 34) {
             roundButton(player.isPaused ? "play.fill" : "pause.fill", size: 84, icon: 32, help: "Pause (Space)") { player.togglePause() }
                 .overlay(alignment: .leading) {
-                    roundButton("backward.end.fill", size: 60, icon: 18, help: "Previous channel (↑)") { player.step(-1) }
+                    ChannelButton(up: true, size: 60) { player.step(-1); showControls() }
                         .offset(x: -94)
                 }
                 .overlay(alignment: .trailing) {
-                    roundButton("forward.end.fill", size: 60, icon: 18, help: "Next channel (↓)") { player.step(1) }
+                    ChannelButton(up: false, size: 60) { player.step(1); showControls() }
                         .offset(x: 94)
                 }
         }
@@ -205,8 +205,15 @@ struct PlayerScreen: View {
                         Text(channel.displayName)
                             .font(.system(size: 26, weight: .bold))
                             .lineLimit(1)
+                        if let now = player.programmes.first {
+                            Text(now.title)
+                                .font(.callout)
+                                .foregroundStyle(.white.opacity(0.75))
+                                .lineLimit(1)
+                        }
                     }
                     Spacer()
+                    LivePill { player.goLive(); showControls() }
                     HStack(spacing: 2) {
                         capsuleButton(library.isFavorite(channel) ? "star.fill" : "star", help: "Favorite (S)") {
                             library.toggleFavorite(channel)
@@ -214,28 +221,6 @@ struct PlayerScreen: View {
                         .foregroundStyle(library.isFavorite(channel) ? .yellow : .white)
                     }
                     .padding(4)
-                    .glassCapsule()
-                }
-                if let now = player.programmes.first {
-                    HStack(spacing: 12) {
-                        Text(now.start, style: .time).monospacedDigit()
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(now.title).font(.callout.weight(.semibold)).lineLimit(1)
-                            ProgressView(value: now.progress).tint(.white).controlSize(.small)
-                        }
-                        Text(now.end, style: .time).monospacedDigit()
-                        if player.programmes.count > 1 {
-                            Divider().frame(height: 26)
-                            Text("Next: \(player.programmes[1].title)")
-                                .lineLimit(1)
-                                .foregroundStyle(.white.opacity(0.7))
-                                .frame(maxWidth: 260, alignment: .leading)
-                        }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
                     .glassCapsule()
                 }
             }
@@ -337,5 +322,59 @@ extension View {
         } else {
             self.background(.ultraThinMaterial, in: Circle())
         }
+    }
+}
+
+/// Channel up / down: a chevron with a small "CH" under it, so it never reads as skip or seek.
+struct ChannelButton: View {
+    let up: Bool
+    let size: CGFloat
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: size * 0.02) {
+                Image(systemName: up ? "chevron.up" : "chevron.down")
+                    .font(.system(size: size * 0.3, weight: .bold))
+                Text("CH")
+                    .font(.system(size: size * 0.17, weight: .heavy, design: .rounded))
+                    .opacity(0.8)
+            }
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .glassCircle()
+            .contentShape(Circle())
+        }
+        .buttonStyle(PressScale())
+        .help(up ? "Previous channel (↑)" : "Next channel (↓)")
+    }
+}
+
+/// Red LIVE badge at the live edge; once paused or stalled it turns into a Go Live button that resyncs.
+struct LivePill: View {
+    @Environment(PlayerModel.self) private var player
+    var compact = false
+    let action: () -> Void
+
+    var body: some View {
+        let behind = player.isBehindLive
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(behind ? Color.white.opacity(0.5) : .red)
+                    .frame(width: compact ? 6 : 8, height: compact ? 6 : 8)
+                Text(behind ? "GO LIVE" : "LIVE")
+                    .font(.system(size: compact ? 10 : 12, weight: .bold))
+                    .tracking(0.6)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, compact ? 9 : 14)
+            .padding(.vertical, compact ? 5 : 9)
+            .glassCapsule()
+        }
+        .buttonStyle(PressScale())
+        .disabled(!behind)
+        .help(behind ? "Jump back to live" : "Watching live")
+        .animation(.easeInOut(duration: 0.2), value: behind)
     }
 }

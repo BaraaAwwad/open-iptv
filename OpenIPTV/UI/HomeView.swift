@@ -20,6 +20,7 @@ struct HomeView: View {
                         Text(library.loadError ?? "Loading channels…").foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, minHeight: 300)
+                    .padding(.horizontal, 36)
                 }
                 if !recents.isEmpty {
                     shelf("Continue Watching", recents, .recents)
@@ -38,9 +39,9 @@ struct HomeView: View {
                             }
                         }
                     }
+                    .padding(.horizontal, 36)
                 }
             }
-            .padding(.horizontal, 36)
             .padding(.top, 22)
             .padding(.bottom, 40)
         }
@@ -56,9 +57,11 @@ struct HomeView: View {
                 }
             }
             .buttonStyle(.plain)
+            .padding(.horizontal, 36)
 
+            // The shelf spans the whole pane, so cards scroll on under the sidebar glass instead of vanishing.
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 22) {
+                HStack(alignment: .top, spacing: 22) {
                     ForEach(channels.prefix(20)) { channel in
                         ShelfTile(channel: channel, isFavorite: library.isFavorite(channel)) {
                             player.play(channel, in: channels)
@@ -79,8 +82,9 @@ struct HomeView: View {
                     }
                 }
                 .padding(.vertical, 6)
+                .padding(.horizontal, 36)
             }
-            // Let the hover lift and shadow spill outside the shelf instead of being cut off.
+            // Hover lift and shadow spill outside the shelf instead of being cut off.
             .scrollClipDisabled()
         }
     }

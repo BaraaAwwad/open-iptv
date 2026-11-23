@@ -4,7 +4,7 @@ import SwiftUI
 /// Drag it to any corner, hover for controls, double-click or ⤢ to expand, ✕ to stop.
 struct MiniPlayer: View {
     @Environment(PlayerModel.self) private var player
-    @AppStorage("pipCorner") private var cornerRaw = Corner.bottomTrailing.rawValue
+    @AppStorage("pipCorner") private var cornerRaw = Corner.topTrailing.rawValue
     @State private var drag: CGSize = .zero
     @State private var hovering = false
 
@@ -14,7 +14,7 @@ struct MiniPlayer: View {
 
     enum Corner: String { case topLeading, topTrailing, bottomLeading, bottomTrailing }
 
-    private var corner: Corner { Corner(rawValue: cornerRaw) ?? .bottomTrailing }
+    private var corner: Corner { Corner(rawValue: cornerRaw) ?? .topTrailing }
 
     private var alignment: Alignment {
         switch corner {
@@ -116,6 +116,7 @@ struct MiniPlayer: View {
                         .foregroundStyle(.white)
                         .lineLimit(1)
                     Spacer()
+                    LivePill(compact: true) { player.goLive() }
                     circle(player.isMuted || player.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill", 28, help: "Mute") {
                         player.isMuted.toggle()
                     }
@@ -124,9 +125,9 @@ struct MiniPlayer: View {
             .padding(10)
             if player.status == .playing {
                 HStack(spacing: 16) {
-                    circle("backward.end.fill", 34, help: "Previous channel") { player.step(-1) }
+                    ChannelButton(up: true, size: 34) { player.step(-1) }
                     circle(player.isPaused ? "play.fill" : "pause.fill", 46, help: "Pause") { player.togglePause() }
-                    circle("forward.end.fill", 34, help: "Next channel") { player.step(1) }
+                    ChannelButton(up: false, size: 34) { player.step(1) }
                 }
             }
         }

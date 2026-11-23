@@ -136,7 +136,7 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom, spacing: 0) { SourceBar() }
+        .sidebarFooter { SourceBar() }
     }
 
     private func row(_ title: String, _ icon: String, _ tag: SidebarItem, _ count: Int?) -> some View {
@@ -212,5 +212,19 @@ struct SourceBar: View {
     private var updatedText: String {
         guard let d = library.fetchedAt, d > .distantPast else { return "Refresh" }
         return "Updated " + d.formatted(.relative(presentation: .named))
+    }
+}
+
+extension View {
+    /// Pins a footer under a scrolling list. On macOS 26 rows fade out under it (scroll edge effect);
+    /// before that it sits on an opaque bar so rows never show through the text.
+    @ViewBuilder func sidebarFooter<F: View>(@ViewBuilder _ footer: () -> F) -> some View {
+        if #available(macOS 26.0, *) {
+            self.safeAreaBar(edge: .bottom, spacing: 0, content: footer)
+        } else {
+            self.safeAreaInset(edge: .bottom, spacing: 0) {
+                footer().background(.bar)
+            }
+        }
     }
 }

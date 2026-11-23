@@ -20,6 +20,8 @@ final class PlayerModel {
     private(set) var status: Status = .idle
     private(set) var isBuffering = false
     private(set) var isPaused = false
+    /// True once a live channel was paused or stalled, so what's on screen is no longer live.
+    private(set) var isBehindLive = false
     private(set) var programmes: [Programme] = []
 
     var volume: Double {
@@ -48,6 +50,7 @@ final class PlayerModel {
         status = .loading
         isBuffering = false
         isPaused = false
+        isBehindLive = false
         programmes = []
         mpv.load(url)
         watchForStall(channel)
@@ -55,10 +58,27 @@ final class PlayerModel {
         loadEPG(channel)
     }
 
+    /// Channel up / down. Steps through the list you played from; when that list is just this channel
+    /// (a one-result search, say) it steps through the channel's category instead.
     func step(_ delta: Int) {
-        guard let channel, let i = list.firstIndex(of: channel), !list.isEmpty else { return }
-        let next = list[(i + delta + list.count) % list.count]
-        play(next, in: list)
+        guard let channel else { return }
+        var source = list
+        if source.count < 2 || !source.contains(channel) {
+            source = library.channels(for: .group(channel.groupID))
+        }
+        guard source.count > 1, let i = source.firstIndex(of: channel) else { return }
+        let next = source[(i + delta + source.count) % source.count]
+        play(next, in: source)
+    }
+
+    /// Reloads the stream at the live edge (pausing or buffering a live channel leaves it behind).
+    func goLive() {
+        guard let channel, let url = library.streamURL(channel) else { return }
+        isBehindLive = false
+        status = .loading
+        isPaused = false
+        mpv.load(url)
+        watchForStall(channel)
     }
 
     func togglePause() {
@@ -104,8 +124,12 @@ final class PlayerModel {
         switch e {
         case .loading: if status != .loading { status = .loading }
         case .playing: status = .playing; isBuffering = false
-        case .buffering(let b): isBuffering = b
-        case .paused(let p): isPaused = p
+        case .buffering(let b):
+            isBuffering = b
+            if b && status == .playing { isBehindLive = true }
+        case .paused(let p):
+            isPaused = p
+            if p && status == .playing { isBehindLive = true }
         case .failed(let msg):
             status = .failed(msg == "loading failed" ? "This channel isn't available right now." : msg.capitalizedFirst)
         case .ended:
