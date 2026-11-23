@@ -82,12 +82,7 @@ struct RootView: View {
     @Environment(Library.self) private var library
     @Environment(PlayerModel.self) private var player
     @Environment(VODStore.self) private var vod
-    /// True when full screen was entered for the player (so leaving the player also leaves full screen).
-    @State private var fullScreenForPlayer = false
-
-    static var mainWindow: NSWindow? {
-        NSApp.windows.first { $0.identifier?.rawValue.contains("main") == true || $0.title == "Open IPTV" }
-    }
+    @State private var fullScreen = FullScreenController()
 
     var body: some View {
         ZStack {
@@ -114,24 +109,12 @@ struct RootView: View {
         }
         // Full-screen playback hides the window toolbar here, at the window's root, so the split view
         // and its sidebar never see a modifier change (toggling it inside the split view rebuilt them).
-        .toolbarVisibility(player.isFull ? .hidden : .automatic, for: .windowToolbar)
-        // The big player is real macOS full screen, never a window-filling mode: expanding enters
-        // full screen, and leaving full screen (Esc, green button, Mission Control) drops back to PiP.
-        .onChange(of: player.mode) { old, new in
-            guard let window = Self.mainWindow else { return }
-            let isFull = window.styleMask.contains(.fullScreen)
-            if new == .full, !isFull {
-                fullScreenForPlayer = true
-                window.toggleFullScreen(nil)
-            } else if old == .full, new != .full, isFull, fullScreenForPlayer {
-                fullScreenForPlayer = false
-                window.toggleFullScreen(nil)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
-            fullScreenForPlayer = false
-            if player.mode == .full { player.mode = .mini }
-        }
+        // The big player is real macOS full screen only (see FullScreenController).
+        .background(WindowReader { window in fullScreen.attach(window, player: player) })
+        // In full screen the toolbar stays out of the way and slides in when you hover at the top,
+        // so nothing has to hide or show it (which used to resize the window mid-transition).
+        .windowToolbarFullScreenVisibility(.onHover)
+        .onChange(of: player.mode) { fullScreen.sync() }
         .sheet(item: Binding(get: { library.newPlaylistRequest }, set: { library.newPlaylistRequest = $0 })) { request in
             PlaylistNameSheet(request: request)
         }
