@@ -47,7 +47,8 @@ struct Channel: Codable, Identifiable, Hashable {
 
     static func stripTag(_ s: String) -> String {
         let trimmed = s.trimmingCharacters(in: .whitespaces)
-        if let r = trimmed.range(of: #"^(\|[A-Za-z0-9-]{1,8}\|\s*)+"#, options: .regularExpression) {
+        // "|UK| ", "| FR | ", "|8k| ", "|VOD-FR| " (any short tag between bars, spaces allowed)
+        if let r = trimmed.range(of: #"^(\|\s*[^|\s][^|]{0,11}\|\s*)+"#, options: .regularExpression) {
             let rest = trimmed[r.upperBound...]
             if !rest.isEmpty { return String(rest) }
         }

@@ -8,7 +8,7 @@ struct VODCategory: Identifiable, Hashable {
     let name: String
 }
 
-struct Movie: Identifiable, Hashable {
+struct Movie: Identifiable, Hashable, Codable {
     let id: Int
     let title: String
     let year: String?
@@ -44,14 +44,8 @@ struct VideoDetails: Hashable {
     var hdr: Bool
 
     var tier: String? {
-        guard let h = height else { return nil }
-        switch h {
-        case 2000...: return "4K"
-        case 1000..<2000: return "1080p"
-        case 700..<1000: return "720p"
-        case 1..<700: return "SD"
-        default: return nil
-        }
+        guard let h = height, h > 0 else { return nil }
+        return QualityTier.from(width: width ?? 0, height: h).rawValue
     }
 
     var summary: String {
@@ -64,7 +58,7 @@ struct VideoDetails: Hashable {
     }
 }
 
-struct Series: Identifiable, Hashable {
+struct Series: Identifiable, Hashable, Codable {
     let id: Int
     let title: String
     let year: String?
@@ -129,9 +123,9 @@ extension XtreamClient {
         return MovieInfo(
             originalTitle: VOD.text(i["o_name"]),
             plot: VOD.text(i["plot"]) ?? VOD.text(i["description"]),
-            cast: VOD.text(i["cast"]) ?? VOD.text(i["actors"]),
-            director: VOD.text(i["director"]),
-            genre: VOD.text(i["genre"]),
+            cast: VOD.list(i["cast"]) ?? VOD.list(i["actors"]),
+            director: VOD.list(i["director"]),
+            genre: VOD.list(i["genre"]),
             released: VOD.text(i["releasedate"]),
             duration: VOD.text(i["duration"]),
             durationSecs: Self.double(i["duration_secs"]),
@@ -150,8 +144,8 @@ extension XtreamClient {
             guard let id = Self.int(s["series_id"]), let raw = s["name"] as? String, !Channel.isSeparator(raw) else { return nil }
             let (title, year) = VOD.split(raw)
             return Series(id: id, title: title, year: year ?? VOD.text(s["releaseDate"]).map { String($0.prefix(4)) },
-                          cover: VOD.url(s["cover"]), plot: VOD.text(s["plot"]), cast: VOD.text(s["cast"]),
-                          director: VOD.text(s["director"]), genre: VOD.text(s["genre"]),
+                          cover: VOD.url(s["cover"]), plot: VOD.text(s["plot"]), cast: VOD.list(s["cast"]),
+                          director: VOD.list(s["director"]), genre: VOD.list(s["genre"]),
                           rating: Self.double(s["rating"]).flatMap { $0 > 0 ? $0 : nil },
                           backdrop: VOD.url(s["backdrop_path"]), trailer: VOD.text(s["youtube_trailer"]), categoryID: category)
         }
@@ -169,7 +163,8 @@ extension XtreamClient {
                 let info = e["info"] as? [String: Any] ?? [:]
                 episodes[season, default: []].append(Episode(
                     id: eid, season: season, number: Self.int(e["episode_num"]) ?? 0,
-                    title: VOD.split(e["title"] as? String ?? "").0, ext: (e["container_extension"] as? String) ?? "mp4",
+                    title: VOD.episodeTitle(e["title"] as? String ?? "", number: Self.int(e["episode_num"]) ?? 0),
+                    ext: (e["container_extension"] as? String) ?? "mp4",
                     plot: VOD.text(info["plot"]), duration: VOD.text(info["duration"]),
                     image: VOD.url(info["movie_image"]), video: VOD.video(info["video"])))
             }
@@ -213,6 +208,21 @@ enum VOD {
     static func text(_ v: Any?) -> String? {
         let s = XtreamClient.string(v)?.trimmingCharacters(in: .whitespacesAndNewlines)
         return (s?.isEmpty == false && s != "0" && s != "null") ? s : nil
+    }
+
+    /// "Mindhunter S01 E02" → "Episode 2"; "Mindhunter S01E02 - The Interview" → "The Interview".
+    static func episodeTitle(_ raw: String, number: Int) -> String {
+        var t = split(raw).0
+        if let r = t.range(of: #"^.*?\bS\d{1,2}\s*E\d{1,3}\b\s*[-:.–]?\s*"#, options: [.regularExpression, .caseInsensitive]) {
+            t.removeSubrange(r)
+        }
+        t = t.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? "Episode \(number)" : t
+    }
+
+    /// "Thriller,Action" → "Thriller, Action"
+    static func list(_ v: Any?) -> String? {
+        text(v).map { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: ", ") }
     }
 
     static func url(_ v: Any?) -> String? {
@@ -310,18 +320,56 @@ final class VODStore {
         } catch { self.error = error.localizedDescription }
     }
 
+    // Category lists are saved on disk: the provider can take 10+ seconds the first time it builds one,
+    // so a revisit (even after a restart) shows the saved list instantly and refreshes it after 12 hours.
+    private func cacheURL(_ name: String) -> URL? {
+        guard let id = sourceID else { return nil }
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Open IPTV/vod-\(id.uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent(name + ".json")
+    }
+
+    private func cached<T: Decodable>(_ name: String, as: T.Type) -> (T, fresh: Bool)? {
+        guard let url = cacheURL(name), let data = try? Data(contentsOf: url),
+              let value = try? JSONDecoder().decode(T.self, from: data) else { return nil }
+        let age = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate).map { Date().timeIntervalSince($0) } ?? .infinity
+        return (value, age < 12 * 3600)
+    }
+
+    private func store<T: Encodable>(_ value: T, _ name: String) {
+        guard let url = cacheURL(name) else { return }
+        Task.detached { if let data = try? JSONEncoder().encode(value) { try? data.write(to: url, options: .atomic) } }
+    }
+
     func loadMovies(_ category: String) async {
         guard let client, movies[category] == nil, !loading.contains("m" + category) else { return }
+        if let (saved, fresh) = cached("m-\(category)", as: [Movie].self) {
+            movies[category] = saved
+            if fresh { return }
+        }
         loading.insert("m" + category)
         defer { loading.remove("m" + category) }
-        do { movies[category] = try await client.movies(in: category) } catch { self.error = error.localizedDescription }
+        do {
+            let list = try await client.movies(in: category)
+            movies[category] = list
+            store(list, "m-\(category)")
+        } catch { if movies[category] == nil { self.error = error.localizedDescription } }
     }
 
     func loadSeries(_ category: String) async {
         guard let client, series[category] == nil, !loading.contains("s" + category) else { return }
+        if let (saved, fresh) = cached("s-\(category)", as: [Series].self) {
+            series[category] = saved
+            if fresh { return }
+        }
         loading.insert("s" + category)
         defer { loading.remove("s" + category) }
-        do { series[category] = try await client.series(in: category) } catch { self.error = error.localizedDescription }
+        do {
+            let list = try await client.series(in: category)
+            series[category] = list
+            store(list, "s-\(category)")
+        } catch { if series[category] == nil { self.error = error.localizedDescription } }
     }
 
     func info(_ m: Movie) async -> MovieInfo? {

@@ -13,13 +13,8 @@ struct StreamQuality: Codable, Hashable {
 
     var tier: QualityTier {
         guard ok else { return .noSignal }
-        switch height {
-        case 2000...: return .uhd
-        case 1000..<2000: return .fhd
-        case 700..<1000: return .hd
-        case 1..<700: return .sd
-        default: return .audio
-        }
+        guard height > 0 else { return .audio }
+        return QualityTier.from(width: width, height: height)
     }
 
     /// "1920×1080 · 50 fps · h264"
@@ -34,6 +29,14 @@ struct StreamQuality: Codable, Hashable {
 }
 
 enum QualityTier: String, CaseIterable, Identifiable {
+    /// Width counts too: a wide-screen film is 3840×1608, which is 4K, not "1440p".
+    static func from(width: Int, height: Int) -> QualityTier {
+        if width >= 3200 || height >= 2000 { return .uhd }
+        if width >= 1800 || height >= 1000 { return .fhd }
+        if width >= 1200 || height >= 700 { return .hd }
+        return .sd
+    }
+
     case uhd = "4K", fhd = "1080p", hd = "720p", sd = "SD", audio = "Audio only", noSignal = "No signal", unchecked = "Not checked"
     var id: String { rawValue }
     /// Short label for tile badges (nil = no badge).

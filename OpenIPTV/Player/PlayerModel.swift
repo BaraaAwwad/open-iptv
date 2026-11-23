@@ -50,6 +50,8 @@ final class PlayerModel {
     /// hidden → nothing playing; mini → picture in picture in a corner; full → fills the window.
     enum Mode { case hidden, mini, full }
     var mode: Mode = .hidden
+    /// Where PiP sits. Every new playback starts top-right; dragging moves it for that session.
+    var pipCorner = "topTrailing"
     var isFull: Bool { mode == .full }
     private(set) var channel: Channel?
     private(set) var list: [Channel] = []
@@ -288,6 +290,7 @@ final class PlayerModel {
         epgTask?.cancel()
         timeoutTask?.cancel()
         mode = .hidden
+        pipCorner = "topTrailing"
         status = .idle
         channel = nil
     }

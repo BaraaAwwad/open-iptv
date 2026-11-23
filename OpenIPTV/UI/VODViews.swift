@@ -74,7 +74,13 @@ struct VODBrowser: View {
     }
 
     private var loadingView: some View {
-        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        let name = categories.first { $0.id == category }.map { VODBrowser.label($0.name) }
+        return VStack(spacing: 10) {
+            ProgressView()
+            Text(name.map { "Loading \($0)…" } ?? "Loading…").foregroundStyle(.secondary)
+            Text("The provider can take a few seconds the first time.").font(.caption).foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func filter<T>(_ items: [T], _ title: KeyPath<T, String>) -> [T] {
@@ -174,22 +180,27 @@ struct ArtworkView: View {
     @State private var failed = false
 
     var body: some View {
-        ZStack {
-            LinearGradient(colors: [Color(white: 0.22), Color(white: 0.12)], startPoint: .top, endPoint: .bottom)
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: fill ? .fill : .fit)
-                    .transition(.opacity)
-            } else if failed || url == nil {
-                Text(placeholder)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .multilineTextAlignment(.center)
-                    .padding(12)
+        // The frame comes from the caller (Color.clear takes exactly the space offered); the image fills
+        // it and is clipped to it, so a wide picture can never spill over its neighbours.
+        Color.clear
+            .overlay {
+                ZStack {
+                    LinearGradient(colors: [Color(white: 0.22), Color(white: 0.12)], startPoint: .top, endPoint: .bottom)
+                    if let image {
+                        Image(nsImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: fill ? .fill : .fit)
+                            .transition(.opacity)
+                    } else if failed || url == nil {
+                        Text(placeholder)
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.6))
+                            .multilineTextAlignment(.center)
+                            .padding(12)
+                    }
+                }
             }
-        }
-        .clipped()
+            .clipped()
         .task(id: url) {
             image = nil
             failed = false
@@ -450,7 +461,8 @@ private struct EpisodeRow: View {
                     }
                 }
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("\(episode.number). \(episode.title)").font(.headline).lineLimit(2)
+                    Text(episode.title.hasPrefix("Episode ") ? episode.title : "\(episode.number). \(episode.title)")
+                        .font(.headline).lineLimit(2)
                     Text(metaLine([episode.duration, episode.video?.tier])).font(.caption).foregroundStyle(.secondary)
                     if let plot = episode.plot {
                         Text(plot).font(.callout).foregroundStyle(.secondary).lineLimit(3)

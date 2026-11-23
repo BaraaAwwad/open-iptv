@@ -4,7 +4,6 @@ import SwiftUI
 /// Drag it to any corner, hover for controls, double-click or ⤢ to expand, ✕ to stop.
 struct MiniPlayer: View {
     @Environment(PlayerModel.self) private var player
-    @AppStorage("pipCorner") private var cornerRaw = Corner.topTrailing.rawValue
     @State private var drag: CGSize = .zero
     @State private var hovering = false
 
@@ -14,7 +13,7 @@ struct MiniPlayer: View {
 
     enum Corner: String { case topLeading, topTrailing, bottomLeading, bottomTrailing }
 
-    private var corner: Corner { Corner(rawValue: cornerRaw) ?? .topTrailing }
+    private var corner: Corner { Corner(rawValue: player.pipCorner) ?? .topTrailing }
 
     private var alignment: Alignment {
         switch corner {
@@ -30,7 +29,7 @@ struct MiniPlayer: View {
             card
                 .offset(drag)
                 .gesture(
-                    DragGesture(minimumDistance: 4)
+                    DragGesture(minimumDistance: 10) // a click with a tiny wobble is not a drag
                         .onChanged { drag = $0.translation }
                         .onEnded { value in snap(value, in: geo.size) }
                 )
@@ -49,7 +48,7 @@ struct MiniPlayer: View {
         let y = startY + value.predictedEndTranslation.height
         let left = x < size.width / 2, top = y < size.height / 2
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-            cornerRaw = (top ? (left ? Corner.topLeading : .topTrailing) : (left ? .bottomLeading : .bottomTrailing)).rawValue
+            player.pipCorner = (top ? (left ? Corner.topLeading : .topTrailing) : (left ? .bottomLeading : .bottomTrailing)).rawValue
             drag = .zero
         }
     }

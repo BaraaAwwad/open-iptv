@@ -44,6 +44,26 @@ struct OpenIPTVApp: App {
             CommandGroup(replacing: .newItem) {}
             SidebarCommands()
             ViewModeCommands()
+            CommandMenu("Playback") {
+                Button(player.mode == .full ? "Picture in Picture" : "Expand Player") {
+                    player.mode = player.mode == .full ? .mini : .full
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(player.mode == .hidden)
+                Button("Stop") { player.close() }
+                    .keyboardShortcut(".", modifiers: .command)
+                    .disabled(player.mode == .hidden)
+                Divider()
+                Button("Previous Channel") { player.step(-1) }
+                    .keyboardShortcut(.upArrow, modifiers: .command)
+                    .disabled(player.mode == .hidden || player.isVOD)
+                Button("Next Channel") { player.step(1) }
+                    .keyboardShortcut(.downArrow, modifiers: .command)
+                    .disabled(player.mode == .hidden || player.isVOD)
+                Button("Go Live") { player.goLive() }
+                    .keyboardShortcut("l", modifiers: .command)
+                    .disabled(player.mode == .hidden || player.isVOD || !player.isBehindLive)
+            }
             CommandMenu("Channels") {
                 Button("Refresh Channel List") { Task { await library.refresh() } }
                     .keyboardShortcut("r")

@@ -18,12 +18,15 @@ struct VideoSurface: NSViewRepresentable {
 final class VideoContainer: NSView {
     private let video: MPVVideoView
     var isActive = true
+    /// Every live container, so a disappearing owner can hand the picture to the one still on screen.
+    private static let all = NSHashTable<VideoContainer>.weakObjects()
 
     init(video: MPVVideoView) {
         self.video = video
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
+        Self.all.add(self)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -42,7 +45,11 @@ final class VideoContainer: NSView {
     }
 
     func release() {
-        if video.superview === self { video.removeFromSuperview() }
+        Self.all.remove(self)
+        guard video.superview === self else { return }
+        video.removeFromSuperview()
+        // Never leave the picture orphaned: give it to whichever player view is still showing.
+        Self.all.allObjects.last { $0.isActive && $0.window != nil }?.claim()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -63,7 +70,9 @@ struct PlayerScreen: View {
     var body: some View {
         ZStack {
             Color.black
-            PlayerVideo(active: true)
+            // Owns the picture only while actually in full mode: during its fade-out after Esc it must
+            // not grab the video back from the PiP view.
+            PlayerVideo(active: player.mode == .full)
             // Double-click to toggle full screen; kept behind the controls so it never delays their clicks.
             Color.clear
                 .contentShape(Rectangle())

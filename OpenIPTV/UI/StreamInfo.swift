@@ -23,7 +23,10 @@ struct StreamInfo {
         // Video
         let w = s("video-params/w"), h = s("video-params/h")
         let dw = s("video-params/dw"), dh = s("video-params/dh")
-        let resolution = (w != nil && h != nil) ? "\(w!) × \(h!)\(label(height: Int(h!) ?? 0))" : nil
+        let resolution = (w != nil && h != nil) ? "\(w!) × \(h!) · \(QualityTier.from(width: Int(w!) ?? 0, height: Int(h!) ?? 0).rawValue)" : nil
+        // With hardware decoding mpv reports "videotoolbox" as the format; the real one is the hw format.
+        let rawFormat = s("video-params/pixelformat"), hwFormat = s("video-params/hw-pixelformat")
+        let pixelFormat = rawFormat == "videotoolbox" ? hwFormat : rawFormat
         let display = (dw != nil && dh != nil && (dw != w || dh != h)) ? "\(dw!) × \(dh!)" : nil
         let rendered = (s("osd-dimensions/w")).flatMap { ow in s("osd-dimensions/h").map { "\(ow) × \($0) (window)" } }
         let fpsNominal = d("container-fps").map { String(format: "%.3g fps", $0) }
@@ -42,8 +45,7 @@ struct StreamInfo {
             ("Measured rate", fpsMeasured),
             ("Bitrate", d("video-bitrate").map(Self.bitrate)),
             ("Aspect", d("video-params/aspect").map { String(format: "%.3f", $0) }),
-            ("Pixel format", s("video-params/pixelformat")),
-            ("Hardware format", s("video-params/hw-pixelformat")),
+            ("Pixel format", pixelFormat),
             ("Color matrix", s("video-params/colormatrix")),
             ("Color range", s("video-params/colorlevels")),
             ("Primaries", primaries),
