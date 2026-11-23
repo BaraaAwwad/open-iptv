@@ -66,11 +66,10 @@ struct HomeView: View {
                         .frame(width: 220)
                     }
                 }
-                .padding(.vertical, 14)
-                .padding(.horizontal, 4)
+                .padding(.vertical, 6)
             }
-            .padding(.horizontal, -4)
-            .padding(.vertical, -14)
+            // Let the hover lift and shadow spill outside the shelf instead of being cut off.
+            .scrollClipDisabled()
         }
     }
 }

@@ -112,13 +112,25 @@ struct Sidebar: View {
                 row("Favorites", "star", .favorites, library.favorites.count)
                 row("Recently Watched", "clock", .recents, nil)
             }
-            ForEach(library.sections) { section in
-                Section(section.title.titleCased, isExpanded: binding(section.id)) {
-                    ForEach(section.groups, id: \.group.id) { entry in
-                        Text(entry.label.titleCased)
-                            .lineLimit(1)
-                            .badge(library.byGroup[entry.group.id]?.count ?? 0)
-                            .tag(SidebarItem.group(entry.group.id))
+            if !library.sections.isEmpty {
+                Section("Categories") {
+                    ForEach(library.sections) { section in
+                        DisclosureGroup(isExpanded: binding(section.id)) {
+                            ForEach(section.groups, id: \.group.id) { entry in
+                                Text(entry.label.titleCased)
+                                    .lineLimit(1)
+                                    .badge(library.byGroup[entry.group.id]?.count ?? 0)
+                                    .tag(SidebarItem.group(entry.group.id))
+                            }
+                        } label: {
+                            Label(section.title.titleCased, systemImage: Self.icon(for: section))
+                                .lineLimit(1)
+                                .badge(section.groups.reduce(0) { $0 + (library.byGroup[$1.group.id]?.count ?? 0) })
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    withAnimation(.easeOut(duration: 0.2)) { binding(section.id).wrappedValue.toggle() }
+                                }
+                        }
                     }
                 }
             }
@@ -131,6 +143,18 @@ struct Sidebar: View {
         Label(title, systemImage: icon)
             .badge(count ?? 0)
             .tag(tag)
+    }
+
+    /// A fitting symbol from the names inside the section.
+    static func icon(for section: GroupSection) -> String {
+        if section.id == "_other" { return "square.stack" }
+        let names = ([section.title] + section.groups.map(\.group.name)).joined(separator: " ").uppercased()
+        if section.groups.allSatisfy({ $0.group.name.uppercased().contains("SPORT") }) || section.title.uppercased() == "BEIN" {
+            return "sportscourt"
+        }
+        if names.contains("KIDS") && section.groups.count <= 2 { return "figure.and.child.holdinghands" }
+        if names.contains("MUSIC") && section.groups.count <= 2 { return "music.note" }
+        return "globe"
     }
 
     private func binding(_ id: String) -> Binding<Bool> {
