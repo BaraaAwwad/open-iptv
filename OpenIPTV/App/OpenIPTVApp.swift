@@ -84,6 +84,7 @@ struct RootView: View {
     @Environment(PlayerModel.self) private var player
     @Environment(VODStore.self) private var vod
     @State private var fullScreen = FullScreenController()
+    @State private var pip = PiPWindowController { AnyView(EmptyView()) }
 
     var body: some View {
         ZStack {
@@ -97,10 +98,6 @@ struct RootView: View {
             // The player layers animate on their own. The animation used to sit on this whole ZStack, so
             // every PiP / full-screen switch also animated the split view re-laying out its sidebar.
             ZStack {
-                if player.mode == .mini {
-                    MiniPlayer()
-                        .transition(.scale(scale: 0.85).combined(with: .opacity))
-                }
                 if player.isFull {
                     PlayerScreen()
                         .transition(.opacity)
@@ -111,11 +108,22 @@ struct RootView: View {
         // Full-screen playback hides the window toolbar here, at the window's root, so the split view
         // and its sidebar never see a modifier change (toggling it inside the split view rebuilt them).
         // The big player is real macOS full screen only (see FullScreenController).
-        .background(WindowReader { window in fullScreen.attach(window, player: player) })
+        .background(WindowReader { window in
+            fullScreen.attach(window, player: player)
+            pip.makeContent = { [player, library, vod] in
+                AnyView(MiniPlayer().environment(player).environment(library).environment(vod))
+            }
+            pip.attach(window)
+            if player.mode == .mini { pip.show() }
+        })
         // In full screen the toolbar stays out of the way and slides in when you hover at the top,
         // so nothing has to hide or show it (which used to resize the window mid-transition).
         .windowToolbarFullScreenVisibility(.onHover)
-        .onChange(of: player.mode) { fullScreen.sync() }
+        .onChange(of: player.mode) {
+            fullScreen.sync()
+            // PiP is its own small window (native resize / move).
+            if player.mode == .mini { pip.show() } else { pip.hide() }
+        }
         .sheet(item: Binding(get: { library.newPlaylistRequest }, set: { library.newPlaylistRequest = $0 })) { request in
             PlaylistNameSheet(request: request)
         }

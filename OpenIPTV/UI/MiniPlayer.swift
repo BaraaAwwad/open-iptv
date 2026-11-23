@@ -1,92 +1,20 @@
+import AppKit
 import SwiftUI
 
-/// Picture in picture: a small floating player in a corner of the window.
-/// Drag it to any corner, hover for controls, double-click or ⤢ to expand, ✕ to stop.
+/// Picture in picture is a real (child) window: AppKit does the resizing (edges, corners, cursor,
+/// 16:9 lock) and moving, like any window. This view is just what's inside it.
 struct MiniPlayer: View {
     @Environment(PlayerModel.self) private var player
-    @State private var drag: CGSize = .zero
     @State private var hovering = false
-    /// Width at the start of a resize drag.
-    @State private var resizeStart: Double?
-    @State private var available: CGSize = .zero
-
-    private var width: CGFloat { CGFloat(player.pipWidth) }
-    private var maxWidth: CGFloat { max(260, min(960, (available.width - 2 * margin) * 0.75)) }
-    private let margin: CGFloat = 20
-    private let topInset: CGFloat = 60 // clear the toolbar
-
-    enum Corner: String { case topLeading, topTrailing, bottomLeading, bottomTrailing }
-
-    private var corner: Corner { Corner(rawValue: player.pipCorner) ?? .topTrailing }
-
-    private var alignment: Alignment {
-        switch corner {
-        case .topLeading: .topLeading
-        case .topTrailing: .topTrailing
-        case .bottomLeading: .bottomLeading
-        case .bottomTrailing: .bottomTrailing
-        }
-    }
 
     var body: some View {
-        GeometryReader { geo in
-            card
-                .offset(drag)
-                .gesture(
-                    DragGesture(minimumDistance: 10) // a click with a tiny wobble is not a drag
-                        .onChanged { drag = $0.translation }
-                        .onEnded { value in snap(value, in: geo.size) }
-                )
-                .padding(.top, topInset)
-                .padding([.horizontal, .bottom], margin)
-                .frame(width: geo.size.width, height: geo.size.height, alignment: alignment)
-                .onAppear { available = geo.size }
-                .onChange(of: geo.size) { _, size in
-                    available = size
-                    if width > maxWidth { player.pipWidth = Double(maxWidth) }
-                }
-        }
-    }
-
-    // MARK: Resizing, like a window: drag the inner edges or corner with the system resize cursor.
-
-    private var dockedLeading: Bool { corner == .topLeading || corner == .bottomLeading }
-    private var dockedTop: Bool { corner == .topLeading || corner == .topTrailing }
-
-    /// Window-level resize handling (see PiPResizer).
-    @State private var resizer = PiPResizer()
-
-    /// Dragging away from the docked corner grows it; the picture stays 16:9.
-    private func resize(_ translation: CGSize, _ axis: Axis.Set, _ ended: Bool) {
-        if ended { resizeStart = nil; return }
-        let start = resizeStart ?? player.pipWidth
-        resizeStart = start
-        let dx = dockedLeading ? translation.width : -translation.width
-        let dy = (dockedTop ? translation.height : -translation.height) * 16 / 9
-        let grow = axis == .horizontal ? dx : axis == .vertical ? dy : max(dx, dy)
-        player.pipWidth = Double(min(max(start + grow, 260), Double(maxWidth)))
-    }
-
-    private func snap(_ value: DragGesture.Value, in size: CGSize) {
-        // Where the card's center ended up decides the corner.
-        let h = width * 9 / 16
-        let startX = corner == .topLeading || corner == .bottomLeading ? margin + width / 2 : size.width - margin - width / 2
-        let startY = corner == .topLeading || corner == .topTrailing ? topInset + h / 2 : size.height - margin - h / 2
-        let x = startX + value.predictedEndTranslation.width
-        let y = startY + value.predictedEndTranslation.height
-        let left = x < size.width / 2, top = y < size.height / 2
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-            player.pipCorner = (top ? (left ? Corner.topLeading : .topTrailing) : (left ? .bottomLeading : .bottomTrailing)).rawValue
-            drag = .zero
-        }
-    }
-
-    private var card: some View {
         ZStack {
             Color.black
             PlayerVideo(active: player.mode == .mini)
+            // Drag anywhere to move the window (system window drag); double-click to expand.
             Color.clear
                 .contentShape(Rectangle())
+                .gesture(WindowDragGesture())
                 .onTapGesture(count: 2) { player.mode = .full }
 
             if player.airPlay != .off {
@@ -99,27 +27,11 @@ struct MiniPlayer: View {
                 controls.transition(.opacity)
             }
         }
-
         .overlay(alignment: .bottom) {
             // Thin progress line for movies / episodes.
             if player.isVOD { Scrubber(compact: true).padding(.horizontal, 10).padding(.bottom, 6) }
         }
-        .frame(width: width, height: width * 9 / 16)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.14))
-        }
-        .shadow(color: .black.opacity(0.45), radius: 24, y: 12)
-        .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }) { frame in
-            resizer.cardFrame = frame
-        }
-        .onAppear {
-            resizer.dockedLeading = { dockedLeading }
-            resizer.dockedTop = { dockedTop }
-            resizer.onResize = { translation, axis, ended in resize(translation, axis, ended) }
-            resizer.install()
-        }
-        .onDisappear { resizer.uninstall() }
+        .ignoresSafeArea()
         .environment(\.colorScheme, .dark)
         .onHover { hovering = $0 }
         .animation(.easeInOut(duration: 0.18), value: hovering)
@@ -214,94 +126,166 @@ struct MiniPlayer: View {
     }
 }
 
-/// Resizing PiP like a window border, handled at the window level (AppKit event monitor) so nothing in
-/// SwiftUI can swallow the press or lose the release:
-/// - mouse moves within 7 pt of PiP's inner edges or corner show the system resize cursor
-/// - a press there starts a resize that follows the mouse until release; everything else is untouched.
+/// The PiP window: a borderless-looking, resizable child window of the main window.
 @MainActor
-final class PiPResizer {
-    /// PiP's frame in window coordinates (top-left origin, SwiftUI global space).
-    var cardFrame: CGRect = .zero
-    var dockedLeading: () -> Bool = { false }
-    var dockedTop: () -> Bool = { true }
-    var onResize: (CGSize, Axis.Set, Bool) -> Void = { _, _, _ in }
+final class PiPWindowController {
+    private var panel: NSPanel?
+    private weak var parent: NSWindow?
+    private var exitObserver: NSObjectProtocol?
+    /// What goes inside (set by RootView, which has the app's shared models).
+    var makeContent: () -> AnyView
 
-    private var monitors: [Any] = []
-    private var dragAxis: Axis.Set?
-    private var dragStart: NSPoint = .zero
-    private var cursorShown = false
-    private let edge: CGFloat = 7, corner: CGFloat = 16
+    init(content: @escaping () -> AnyView) { self.makeContent = content }
 
-    func install() {
-        guard monitors.isEmpty else { return }
-        NSApp.windows.forEach { $0.acceptsMouseMovedEvents = true }
-        if let m = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .leftMouseDragged, .leftMouseUp],
-                                                    handler: { [weak self] e in
-            MainActor.assumeIsolated { self?.handle(e) ?? e }
-        }) { monitors.append(m) }
-    }
-
-    func uninstall() {
-        monitors.forEach(NSEvent.removeMonitor)
-        monitors = []
-        if cursorShown { NSCursor.arrow.set(); cursorShown = false }
-    }
-
-    private func point(_ e: NSEvent) -> CGPoint? {
-        guard let h = e.window?.contentView?.bounds.height else { return nil }
-        return CGPoint(x: e.locationInWindow.x, y: h - e.locationInWindow.y)
-    }
-
-    /// Which resize zone the point is in, if any: the inner vertical edge, inner horizontal edge or inner corner.
-    private func zone(_ p: CGPoint) -> (axis: Axis.Set, cursor: NSCursor)? {
-        let f = cardFrame
-        guard f.width > 0, f.insetBy(dx: -2, dy: -2).contains(p) else { return nil }
-        let leading = dockedLeading(), top = dockedTop()
-        let edgeX = leading ? f.maxX : f.minX        // the side facing into the window
-        let edgeY = top ? f.maxY : f.minY
-        let nearX = abs(p.x - edgeX) <= edge, nearY = abs(p.y - edgeY) <= edge
-        let inCorner = abs(p.x - edgeX) <= corner && abs(p.y - edgeY) <= corner
-        let hPos: NSCursor.FrameResizePosition = leading ? .right : .left
-        let vPos: NSCursor.FrameResizePosition = top ? .bottom : .top
-        if inCorner {
-            let pos: NSCursor.FrameResizePosition = top ? (leading ? .bottomRight : .bottomLeft) : (leading ? .topRight : .topLeft)
-            return ([.horizontal, .vertical], .frameResize(position: pos, directions: .all))
+    func attach(_ window: NSWindow) {
+        guard window !== parent else { return }
+        parent = window
+        if let o = exitObserver { NotificationCenter.default.removeObserver(o) }
+        // Coming out of full screen: show PiP once the window is back.
+        exitObserver = NotificationCenter.default.addObserver(forName: NSWindow.didExitFullScreenNotification,
+                                                              object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.pendingShow?() }
         }
-        if nearX { return (.horizontal, .frameResize(position: hPos, directions: .all)) }
-        if nearY { return (.vertical, .frameResize(position: vPos, directions: .all)) }
-        return nil
     }
 
-    private func handle(_ e: NSEvent) -> NSEvent? {
-        switch e.type {
-        case .mouseMoved:
-            guard dragAxis == nil, let p = point(e) else { return e }
-            if let z = zone(p) {
-                z.cursor.set()
-                cursorShown = true
-            } else if cursorShown {
-                NSCursor.arrow.set()
-                cursorShown = false
-            }
-            return e
-        case .leftMouseDown:
-            guard let p = point(e), let z = zone(p) else { return e }
-            dragAxis = z.axis
-            dragStart = NSEvent.mouseLocation
-            z.cursor.set()
-            return nil
-        case .leftMouseDragged:
-            guard let axis = dragAxis else { return e }
-            let now = NSEvent.mouseLocation
-            onResize(CGSize(width: now.x - dragStart.x, height: dragStart.y - now.y), axis, false)
-            return nil
-        case .leftMouseUp:
-            guard dragAxis != nil else { return e }
-            dragAxis = nil
-            onResize(.zero, [], true)
-            return nil
-        default:
-            return e
+    private var pendingShow: (() -> Void)?
+
+    func show() {
+        guard let parent else { return }
+        if parent.styleMask.contains(.fullScreen) {
+            pendingShow = { [weak self] in self?.pendingShow = nil; self?.show() }
+            return
         }
+        let panel = self.panel ?? makePanel()
+        // Never bigger than 60% of the app window.
+        let lim = limits
+        panel.contentMaxSize = NSSize(width: lim.max, height: lim.max * 9 / 16)
+        if panel.frame.width > lim.max {
+            panel.setFrame(NSRect(x: panel.frame.maxX - lim.max, y: panel.frame.maxY - lim.max * 9 / 16,
+                                  width: lim.max, height: lim.max * 9 / 16), display: true)
+        }
+        if panel.parent == nil {
+            if !panel.isVisible { place(panel, in: parent) }
+            parent.addChildWindow(panel, ordered: .above)
+        }
+        panel.orderFront(nil)
+    }
+
+    func hide() {
+        pendingShow = nil
+        guard let panel else { return }
+        UserDefaults.standard.set(Double(panel.frame.width), forKey: "pipWidth")
+        parent?.removeChildWindow(panel)
+        panel.orderOut(nil)
+    }
+
+    private func makePanel() -> NSPanel {
+        // Remembered size, kept inside the limits.
+        let width = min(max(UserDefaults.standard.object(forKey: "pipWidth") as? Double ?? 420, Self.minWidth), Self.maxWidthCap)
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: width, height: width * 9 / 16),
+                            styleMask: [.titled, .resizable, .fullSizeContentView, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        [.closeButton, .miniaturizeButton, .zoomButton].forEach { panel.standardWindowButton($0)?.isHidden = true }
+        panel.contentAspectRatio = NSSize(width: 16, height: 9)
+        panel.contentMinSize = NSSize(width: Self.minWidth, height: Self.minWidth * 9 / 16)
+        panel.contentMaxSize = NSSize(width: Self.maxWidthCap, height: Self.maxWidthCap * 9 / 16)
+        panel.isMovableByWindowBackground = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false
+        panel.backgroundColor = .black
+        panel.hasShadow = true
+        panel.collectionBehavior = [.fullScreenAuxiliary]
+        // The SwiftUI content, with plain AppKit corner handles on top (siblings, not inside SwiftUI):
+        // the window's own edges resize natively; the corners get the diagonal cursor and resize too.
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.cornerRadius = 12
+        container.layer?.masksToBounds = true
+        let host = NSHostingView(rootView: makeContent())
+        host.autoresizingMask = [.width, .height]
+        container.addSubview(host)
+        for corner in CornerHandle.Corner.allCases {
+            let handle = CornerHandle(corner: corner, limits: { [weak self] in self?.limits ?? (Self.minWidth, Self.maxWidthCap) })
+            container.addSubview(handle)
+        }
+        panel.contentView = container
+        host.frame = container.bounds
+        self.panel = panel
+        return panel
+    }
+
+    static let minWidth: CGFloat = 384
+    static let maxWidthCap: CGFloat = 960
+
+    /// Min / max width right now (max follows the app window: 60% of it, at most 960).
+    var limits: (min: CGFloat, max: CGFloat) {
+        let byWindow = (parent?.frame.width ?? 1600) * 0.6
+        return (Self.minWidth, max(Self.minWidth, min(Self.maxWidthCap, byWindow)))
+    }
+
+    /// First time: top-right of the main window, below the toolbar.
+    private func place(_ panel: NSPanel, in parent: NSWindow) {
+        let content = parent.contentLayoutRect
+        let origin = parent.convertPoint(toScreen: NSPoint(x: content.maxX - panel.frame.width - 20,
+                                                           y: content.maxY - panel.frame.height - 12))
+        panel.setFrameOrigin(origin)
+    }
+}
+
+/// A corner of the PiP window: diagonal resize cursor, and dragging resizes from that corner
+/// (16:9, opposite corner stays put, within the limits).
+final class CornerHandle: NSView {
+    enum Corner: CaseIterable { case topLeft, topRight, bottomLeft, bottomRight }
+    private let corner: Corner
+    private let limits: () -> (min: CGFloat, max: CGFloat)
+    private var startMouse: NSPoint = .zero
+    private var startFrame: NSRect = .zero
+    private static let size: CGFloat = 14
+
+    init(corner: Corner, limits: @escaping () -> (min: CGFloat, max: CGFloat)) {
+        self.corner = corner
+        self.limits = limits
+        super.init(frame: NSRect(x: 0, y: 0, width: Self.size, height: Self.size))
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private var isLeft: Bool { corner == .topLeft || corner == .bottomLeft }
+    private var isTop: Bool { corner == .topLeft || corner == .topRight }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        guard let b = superview?.bounds else { return }
+        // AppKit coordinates: y grows upward.
+        setFrameOrigin(NSPoint(x: isLeft ? 0 : b.width - Self.size, y: isTop ? b.height - Self.size : 0))
+        autoresizingMask = [isLeft ? .maxXMargin : .minXMargin, isTop ? .minYMargin : .maxYMargin]
+    }
+
+    override func resetCursorRects() {
+        let pos: NSCursor.FrameResizePosition = isTop ? (isLeft ? .topLeft : .topRight) : (isLeft ? .bottomLeft : .bottomRight)
+        addCursorRect(bounds, cursor: .frameResize(position: pos, directions: .all))
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func mouseDown(with event: NSEvent) {
+        startMouse = NSEvent.mouseLocation
+        startFrame = window?.frame ?? .zero
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let window else { return }
+        let now = NSEvent.mouseLocation
+        let dx = (now.x - startMouse.x) * (isLeft ? -1 : 1)
+        let dy = (now.y - startMouse.y) * (isTop ? 1 : -1)
+        let lim = limits()
+        let width = min(max(startFrame.width + max(dx, dy * 16 / 9), lim.min), lim.max)
+        let height = width * 9 / 16
+        // The opposite corner stays where it was.
+        let x = isLeft ? startFrame.maxX - width : startFrame.minX
+        let y = isTop ? startFrame.minY : startFrame.maxY - height
+        window.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
     }
 }
