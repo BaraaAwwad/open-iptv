@@ -4,11 +4,17 @@ import SwiftUI
 struct OpenIPTVApp: App {
     @State private var library: Library
     @State private var player: PlayerModel
+    @State private var scanner: QualityScanner
 
     init() {
         let library = Library()
+        let player = PlayerModel(library: library)
+        // The scanner only probes while nothing plays, and drops its probe the moment you press play.
+        let scanner = QualityScanner(library: library, isPlayerBusy: { player.mode != .hidden })
+        player.willOpenStream = { scanner.yieldToPlayer() }
         _library = State(initialValue: library)
-        _player = State(initialValue: PlayerModel(library: library))
+        _player = State(initialValue: player)
+        _scanner = State(initialValue: scanner)
     }
 
     var body: some Scene {
@@ -17,6 +23,7 @@ struct OpenIPTVApp: App {
             RootView()
                 .environment(library)
                 .environment(player)
+                .environment(scanner)
                 .frame(minWidth: 860, minHeight: 540)
         }
         .defaultSize(width: 1280, height: 800)

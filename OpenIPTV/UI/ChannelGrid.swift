@@ -75,6 +75,8 @@ struct ChannelBrowser: View {
             Text("\(channels.count) channels")
                 .font(.title3)
                 .foregroundStyle(.tertiary)
+            Spacer(minLength: 12)
+            ScanControl(channels: channels, title: title)
         }
     }
 
@@ -83,7 +85,7 @@ struct ChannelBrowser: View {
                   spacing: 30) {
             ForEach(channels) { channel in
                 ChannelTile(channel: channel, focused: nav.focusID == channel.id,
-                            isFavorite: library.isFavorite(channel)) { activate(channel) }
+                            isFavorite: library.isFavorite(channel), quality: library.quality(channel)) { activate(channel) }
                     .overlay(alignment: .topLeading) {
                         if selection.isActive { SelectBadge(selected: selection.contains(channel)).padding(8) }
                     }
@@ -99,7 +101,8 @@ struct ChannelBrowser: View {
             ForEach(channels) { channel in
                 ChannelRow(channel: channel, focused: nav.focusID == channel.id,
                            isFavorite: library.isFavorite(channel),
-                           group: showGroup ? library.groupName(channel.groupID).titleCased : nil) { activate(channel) }
+                           group: showGroup ? library.groupName(channel.groupID).titleCased : nil,
+                           quality: library.quality(channel)) { activate(channel) }
                     .overlay(alignment: .trailing) {
                         if selection.isActive { SelectBadge(selected: selection.contains(channel)).padding(.trailing, 40) }
                     }
@@ -133,6 +136,71 @@ struct ChannelBrowser: View {
         }
         if library.isRecent(channel) {
             Button("Remove from Recently Watched") { library.removeRecent(channel) }
+        }
+    }
+}
+
+// MARK: - Quality
+
+/// "1080p" / "4K" / "No signal" capsule, from measured data only.
+struct QualityBadge: View {
+    let quality: StreamQuality
+
+    var body: some View {
+        if let label = quality.tier.badge {
+            Text(label)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(quality.tier == .noSignal ? .white.opacity(0.8) : .white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(color, in: Capsule())
+                .help(quality.summary)
+        }
+    }
+
+    private var color: Color {
+        switch quality.tier {
+        case .uhd: .purple.opacity(0.85)
+        case .fhd: .blue.opacity(0.85)
+        case .hd: .teal.opacity(0.85)
+        case .noSignal: .red.opacity(0.6)
+        default: .black.opacity(0.55)
+        }
+    }
+}
+
+/// "Check Quality" for the list on screen, or the running scan's progress.
+struct ScanControl: View {
+    @Environment(QualityScanner.self) private var scanner
+    @Environment(Library.self) private var library
+    let channels: [Channel]
+    let title: String
+
+    private var unchecked: Int { channels.filter { library.quality($0) == nil }.count }
+
+    var body: some View {
+        if scanner.isRunning {
+            HStack(spacing: 10) {
+                ProgressView(value: Double(scanner.done), total: Double(max(scanner.total, 1)))
+                    .frame(width: 90)
+                    .controlSize(.small)
+                Text(scanner.waitingForPlayer ? "Paused while playing" : "Checking \(scanner.title): \(scanner.done) of \(scanner.total)")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Button("Stop") { scanner.cancel() }
+            }
+        } else if QualityScanner.ffprobe != nil, !channels.isEmpty {
+            Button {
+                scanner.scan(channels, title: title)
+            } label: {
+                Label("Check Quality", systemImage: "waveform.badge.magnifyingglass")
+            }
+            .disabled(channels.count > 500 || unchecked == 0)
+            .help(channels.count > 500
+                  ? "Too many channels to check at once. Open a category or playlist."
+                  : unchecked == 0 ? "Every channel here has been checked."
+                  : "Opens each channel briefly, one at a time, to measure its real resolution (\(unchecked) to check, about \(max(1, unchecked * 4 / 60)) min). Pauses while you watch.")
         }
     }
 }
@@ -200,6 +268,7 @@ struct ChannelTile: View {
     let channel: Channel
     let focused: Bool
     let isFavorite: Bool
+    var quality: StreamQuality? = nil
     let action: () -> Void
 
     var body: some View {
@@ -224,6 +293,9 @@ struct ChannelTile: View {
                             .padding(8)
                     }
                 }
+                .overlay(alignment: .bottomTrailing) {
+                    if let quality { QualityBadge(quality: quality).padding(8) }
+                }
                 .overlay {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .strokeBorder(.white.opacity(focused ? 0.55 : 0.07), lineWidth: focused ? 1.5 : 1)
@@ -244,7 +316,7 @@ struct ChannelTile: View {
         .buttonStyle(.plain)
         .focusable(false)
         .animation(.spring(response: 0.28, dampingFraction: 0.72), value: focused)
-        .help(channel.name)
+        .help(quality.map { "\(channel.name)\n\($0.summary)" } ?? channel.name)
     }
 }
 
@@ -255,6 +327,7 @@ struct ChannelRow: View {
     let focused: Bool
     let isFavorite: Bool
     let group: String?
+    var quality: StreamQuality? = nil
     let action: () -> Void
 
     var body: some View {
@@ -280,6 +353,10 @@ struct ChannelRow: View {
                     }
                 }
                 Spacer(minLength: 8)
+                if let quality {
+                    Text(quality.summary).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    QualityBadge(quality: quality)
+                }
                 if isFavorite {
                     Image(systemName: "star.fill").font(.caption).foregroundStyle(.yellow)
                 }

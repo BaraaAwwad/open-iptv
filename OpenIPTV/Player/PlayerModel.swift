@@ -15,6 +15,9 @@ final class PlayerModel {
     @ObservationIgnored private var loadTask: Task<Void, Never>?
     /// Automatic reconnects for the current channel (capped, so a flaky stream can't loop forever).
     @ObservationIgnored private var autoRetries = 0
+    /// Called right before a stream is opened (the quality scanner steps aside).
+    @ObservationIgnored var willOpenStream: () -> Void = {}
+    @ObservationIgnored private var measureTask: Task<Void, Never>?
 
     // AirPlay: the stream is repackaged to HLS and played through AVPlayer so a TV can take it.
     enum AirPlayState: Equatable { case off, preparing, ready, failed(String) }
@@ -90,7 +93,7 @@ final class PlayerModel {
                 startAirPlay(url) // already on AirPlay: switch the TV to the new channel
                 return
             }
-            mpv.load(url)
+            open(url)
             watchForStall(channel)
         }
     }
@@ -99,6 +102,26 @@ final class PlayerModel {
     func serverHost(_ c: Channel) -> String? {
         guard let u = library.streamURL(c), let host = u.host() else { return nil }
         return u.port.map { "\(host):\($0)" } ?? host
+    }
+
+    private func open(_ url: URL) {
+        willOpenStream()
+        mpv.load(url)
+    }
+
+    /// Records what the stream really delivers, a moment after it starts.
+    private func measure(_ channel: Channel) {
+        measureTask?.cancel()
+        measureTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, !Task.isCancelled, self.channel == channel, status == .playing, airPlay == .off else { return }
+            let w = mpv.string("video-params/w").flatMap(Int.init) ?? 0
+            let h = mpv.string("video-params/h").flatMap(Int.init) ?? 0
+            let fps = mpv.double("container-fps") ?? mpv.double("estimated-vf-fps")
+            library.recordQuality(channel, StreamQuality(width: w, height: h, fps: fps.map { ($0 * 100).rounded() / 100 },
+                                                         codec: mpv.string("video-codec-name") ?? mpv.string("audio-codec-name"),
+                                                         checked: Date(), ok: true))
+        }
     }
 
     // MARK: AirPlay
@@ -114,6 +137,7 @@ final class PlayerModel {
 
     private func startAirPlay(_ url: URL) {
         // The provider allows one connection, so the Mac's own player lets go first.
+        willOpenStream()
         mpv.stop()
         timeoutTask?.cancel()
         airPlay = .preparing
@@ -168,7 +192,7 @@ final class PlayerModel {
         isBehindLive = false
         status = .loading
         isPaused = false
-        mpv.load(url)
+        open(url)
         watchForStall(channel)
     }
 
@@ -222,7 +246,10 @@ final class PlayerModel {
     private func handle(_ e: MPV.Event) {
         switch e {
         case .loading: if status != .loading { status = .loading }
-        case .playing: status = .playing; isBuffering = false
+        case .playing:
+            status = .playing
+            isBuffering = false
+            if let channel { measure(channel) }
         case .buffering(let b):
             isBuffering = b
             if b && status == .playing { isBehindLive = true }
@@ -241,7 +268,7 @@ final class PlayerModel {
                     try? await Task.sleep(for: .milliseconds(1500))
                     guard let self, !Task.isCancelled, self.channel == channel else { return }
                     PlayerLog.write("retry after refusal \(channel.id)")
-                    mpv.load(url)
+                    open(url)
                     watchForStall(channel)
                 }
                 return
@@ -259,7 +286,7 @@ final class PlayerModel {
                 loadTask = Task { [weak self] in
                     try? await Task.sleep(for: .seconds(1))
                     guard let self, !Task.isCancelled, self.channel == channel else { return }
-                    mpv.load(url)
+                    open(url)
                     watchForStall(channel)
                 }
             } else {

@@ -18,6 +18,9 @@ final class Library {
 
     private(set) var favorites: [String] = []
     private(set) var playlists: [UserPlaylist] = []
+    /// Measured stream quality by channel id (from playback and scans).
+    private(set) var qualities: [String: StreamQuality] = [:]
+    @ObservationIgnored private var qualitySaveTask: Task<Void, Never>?
     /// Set to ask for a new playlist's name (optionally adding this channel to it).
     var newPlaylistRequest: NewPlaylistRequest?
     struct NewPlaylistRequest: Identifiable {
@@ -55,6 +58,7 @@ final class Library {
         return d
     }()
     private static var sourcesFile: URL { dir.appendingPathComponent("sources.json") }
+    private static func qualityFile(_ id: UUID) -> URL { dir.appendingPathComponent("quality-\(id.uuidString).json") }
     private static func cacheFile(_ id: UUID) -> URL { dir.appendingPathComponent("catalog-\(id.uuidString).json") }
 
     init() {
@@ -98,6 +102,10 @@ final class Library {
     func load() async {
         guard let source = active else { return }
         favorites = UserDefaults.standard.stringArray(forKey: "fav-\(source.id)") ?? []
+        let qfile = Self.qualityFile(source.id)
+        qualities = await Task.detached { () -> [String: StreamQuality] in
+            (try? Data(contentsOf: qfile)).flatMap { try? JSONDecoder().decode([String: StreamQuality].self, from: $0) } ?? [:]
+        }.value
         playlists = UserDefaults.standard.data(forKey: "playlists-\(source.id)")
             .flatMap { try? JSONDecoder().decode([UserPlaylist].self, from: $0) } ?? []
         recents = UserDefaults.standard.stringArray(forKey: "recent-\(source.id)") ?? []
@@ -194,6 +202,23 @@ final class Library {
     func groupName(_ id: String) -> String { groups.first { $0.id == id }?.name ?? "" }
 
     func isFavorite(_ c: Channel) -> Bool { favorites.contains(c.id) }
+
+    // MARK: Measured quality
+
+    func quality(_ c: Channel) -> StreamQuality? { qualities[c.id] }
+    func tier(_ c: Channel) -> QualityTier { qualities[c.id]?.tier ?? .unchecked }
+
+    func recordQuality(_ c: Channel, _ q: StreamQuality) {
+        qualities[c.id] = q
+        guard let s = active else { return }
+        let file = Self.qualityFile(s.id)
+        qualitySaveTask?.cancel()
+        qualitySaveTask = Task { [qualities] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await Task.detached { if let data = try? JSONEncoder().encode(qualities) { try? data.write(to: file, options: .atomic) } }.value
+        }
+    }
 
     // MARK: My Playlists
 

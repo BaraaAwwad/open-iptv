@@ -16,14 +16,16 @@ struct BrowserView: View {
     @State private var nav = Navigator()
     @State private var playlistRef: PlaylistRef? = .favorites
     @State private var selecting = SelectionModel()
+    @State private var qualityFilter: QualityTier?
 
     private var item: SidebarItem { selection ?? .home }
     private var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
-        let shown = isSearching ? library.search(query)
+        let unfiltered = isSearching ? library.search(query)
             : item == .playlists ? library.channels(in: playlistRef ?? .favorites)
             : library.channels(for: item)
+        let shown = qualityFilter.map { f in unfiltered.filter { library.tier($0) == f } } ?? unfiltered
         NavigationSplitView {
             Sidebar(selection: $selection, expanded: $expanded)
                 .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 320)
@@ -64,6 +66,22 @@ struct BrowserView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 if item != .home || isSearching {
+                    Menu {
+                        Picker("Quality", selection: $qualityFilter) {
+                            Text("All Qualities").tag(QualityTier?.none)
+                            Divider()
+                            ForEach(QualityTier.allCases) { t in Text(t.rawValue).tag(QualityTier?.some(t)) }
+                        }
+                        .pickerStyle(.inline)
+                    } label: {
+                        Label(qualityFilter?.rawValue ?? "Quality",
+                              systemImage: qualityFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                    }
+                    .help("Filter by measured quality (only channels that were played or checked have one)")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                if item != .home || isSearching {
                     Button(selecting.isActive ? "Done" : "Select") {
                         if selecting.isActive { selecting.end() } else { selecting.isActive = true }
                     }
@@ -94,7 +112,7 @@ struct BrowserView: View {
             nav.setQuery = { query = $0 }
             nav.install()
         }
-        .onChange(of: "\(query)|\(item)|\(library.channels.count)|\(library.favorites.count)|\(String(describing: playlistRef))|\(library.playlists.map(\.channelIDs.count))", initial: true) {
+        .onChange(of: "\(query)|\(item)|\(library.channels.count)|\(library.favorites.count)|\(String(describing: playlistRef))|\(String(describing: qualityFilter))|\(library.playlists.map(\.channelIDs.count))", initial: true) {
             nav.setItems(shown, focusFirst: isSearching)
         }
         .onChange(of: player.channel?.id) { _, id in
@@ -119,6 +137,7 @@ struct BrowserView: View {
     }
 
     private var emptyMessage: String {
+        if let f = qualityFilter { return "No \(f.rawValue) channels here yet. Use Check Quality to measure them." }
         if isSearching { return "No channels match “\(query)”." }
         if library.isLoading && library.channels.isEmpty { return "Loading channels…" }
         if let e = library.loadError, library.channels.isEmpty { return e }
