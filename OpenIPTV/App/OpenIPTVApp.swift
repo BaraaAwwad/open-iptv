@@ -5,6 +5,7 @@ struct OpenIPTVApp: App {
     @State private var library: Library
     @State private var player: PlayerModel
     @State private var scanner: QualityScanner
+    @State private var vod: VODStore
 
     init() {
         let library = Library()
@@ -21,6 +22,11 @@ struct OpenIPTVApp: App {
         _library = State(initialValue: library)
         _player = State(initialValue: player)
         _scanner = State(initialValue: scanner)
+        let vod = VODStore(library: library)
+        player.saveVODProgress = { item, position, duration in
+            vod.save(item.key, position: position, duration: duration, series: item.seriesID)
+        }
+        _vod = State(initialValue: vod)
     }
 
     var body: some Scene {
@@ -30,6 +36,7 @@ struct OpenIPTVApp: App {
                 .environment(library)
                 .environment(player)
                 .environment(scanner)
+                .environment(vod)
                 .frame(minWidth: 860, minHeight: 540)
         }
         .defaultSize(width: 1280, height: 800)

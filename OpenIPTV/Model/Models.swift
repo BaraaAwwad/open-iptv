@@ -85,7 +85,7 @@ struct Programme: Hashable {
 }
 
 enum SidebarItem: Hashable {
-    case home, all, playlists, favorites, recents
+    case home, all, movies, series, playlists, favorites, recents
     case group(String)
 }
 

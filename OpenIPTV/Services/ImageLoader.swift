@@ -20,20 +20,22 @@ actor ImageLoader {
 
     init() { memory.countLimit = 1500 }
 
-    func image(_ string: String) async -> NSImage? {
-        if let img = memory.object(forKey: string as NSString) { return img }
+    /// `maxPixels`: 320 for logos, larger for posters and backdrops.
+    func image(_ string: String, maxPixels: Int = 320) async -> NSImage? {
+        let key = maxPixels == 320 ? string : "\(maxPixels)|\(string)"
+        if let img = memory.object(forKey: key as NSString) { return img }
         if failed.contains(string) { return nil }
-        if let task = inflight[string] { return await task.value }
+        if let task = inflight[key] { return await task.value }
         let session = session
         let task = Task<NSImage?, Never> {
             guard let url = URL(string: string), let (data, resp) = try? await session.data(from: url),
                   (resp as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true else { return nil }
-            return Self.downsample(data, maxPixels: 320)
+            return Self.downsample(data, maxPixels: maxPixels)
         }
-        inflight[string] = task
+        inflight[key] = task
         let img = await task.value
-        inflight[string] = nil
-        if let img { memory.setObject(img, forKey: string as NSString) } else { failed.insert(string) }
+        inflight[key] = nil
+        if let img { memory.setObject(img, forKey: key as NSString) } else { failed.insert(string) }
         return img
     }
 

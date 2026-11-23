@@ -40,7 +40,7 @@ struct XtreamClient {
         return url
     }
 
-    private func json(_ action: String? = nil, _ extra: [URLQueryItem] = []) async throws -> Any {
+    func json(_ action: String? = nil, _ extra: [URLQueryItem] = []) async throws -> Any {
         let data = try await fetchData(try apiURL(action, extra))
         guard let obj = try? JSONSerialization.jsonObject(with: data) else { throw SourceError.format }
         return obj

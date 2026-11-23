@@ -56,6 +56,9 @@ final class MPV {
     // MARK: Commands
 
     func load(_ url: URL) { command("loadfile", url.absoluteString, "replace") }
+    func seek(_ seconds: Double, absolute: Bool) {
+        command("seek", String(format: "%.1f", seconds), absolute ? "absolute" : "relative")
+    }
     func stop() { command("stop") }
 
     func set(_ name: String, _ value: String) { mpv_set_property_string(handle, name, value) }

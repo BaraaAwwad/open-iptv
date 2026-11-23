@@ -32,6 +32,10 @@ struct BrowserView: View {
         } detail: {
             if item == .home && !isSearching {
                 HomeView(selection: $selection, nav: nav)
+            } else if item == .movies || item == .series {
+                // Search filters the open category here.
+                VODBrowser(kind: item == .movies ? .movies : .series, query: query)
+                    .id(item)
             } else if item == .playlists && !isSearching {
                 // Playlists on the left, that playlist's channels on the right, in one view.
                 HStack(spacing: 0) {
@@ -130,7 +134,7 @@ struct BrowserView: View {
     }
 
     /// Home has no channel list, so the list tools are disabled there (not removed).
-    private var showsChannelList: Bool { item != .home || isSearching }
+    private var showsChannelList: Bool { (item != .home || isSearching) && item != .movies && item != .series }
 
     private var isGroup: Bool {
         if case .group = item { return true }
@@ -161,6 +165,12 @@ struct Sidebar: View {
                 row("Home", "house", .home, nil)
                 row("All Channels", "square.grid.2x2", .all, library.channels.count)
                 row("My Playlists", "music.note.list", .playlists, library.playlists.count + 1)
+            }
+            if library.active?.kind == .xtream {
+                Section("On Demand") {
+                    row("Movies", "film", .movies, nil)
+                    row("Series", "tv", .series, nil)
+                }
             }
             Section("Library") {
                 row("Recently Watched", "clock", .recents, nil)

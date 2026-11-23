@@ -17,6 +17,24 @@ final class PlayerModel {
     @ObservationIgnored private var autoRetries = 0
     /// Called right before a stream is opened (the quality scanner steps aside).
     @ObservationIgnored var willOpenStream: () -> Void = {}
+
+    // MARK: On-demand (movies / episodes)
+
+    struct VODItem: Equatable {
+        let key: String          // "m<id>" / "e<id>", for resume
+        let title: String
+        let subtitle: String?
+        let artwork: String?
+        let url: URL
+        var seriesID: Int? = nil
+        var start: Double? = nil
+    }
+    /// Set while a movie or episode plays (nil for live channels).
+    private(set) var vod: VODItem?
+    var isVOD: Bool { vod != nil }
+    /// Saves the watch position (wired to VODStore).
+    @ObservationIgnored var saveVODProgress: (VODItem, Double, Double) -> Void = { _, _, _ in }
+    @ObservationIgnored private var progressTask: Task<Void, Never>?
     @ObservationIgnored private var measureTask: Task<Void, Never>?
 
     // AirPlay: the stream is repackaged to HLS and played through AVPlayer so a TV can take it.
@@ -65,8 +83,51 @@ final class PlayerModel {
         }
     }
 
+    func playVOD(_ item: VODItem) {
+        saveCurrentVOD()
+        if airPlay != .off { stopAirPlay(resumeHere: false) }
+        loadTask?.cancel()
+        timeoutTask?.cancel()
+        vod = item
+        list = []
+        channel = Channel(id: "vod:" + item.key, name: item.title, logo: item.artwork, groupID: "", streamID: nil, url: nil, epgID: nil)
+        if mode == .hidden { mode = .mini }
+        status = .loading
+        isBuffering = false
+        isPaused = false
+        isBehindLive = false
+        programmes = []
+        autoRetries = 0
+        PlayerLog.write("play vod \(item.key)")
+        mpv.set("start", item.start.map { String(format: "%.0f", max(0, $0 - 3)) } ?? "none")
+        open(item.url)
+        watchForStall(channel!, seconds: 25)
+        progressTask?.cancel()
+        progressTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                self?.saveCurrentVOD()
+            }
+        }
+    }
+
+    /// Current position and length of the movie / episode.
+    func vodTime() -> (position: Double, duration: Double)? {
+        guard isVOD, let d = mpv.double("duration"), d > 0 else { return nil }
+        return (mpv.double("time-pos") ?? 0, d)
+    }
+
+    func seek(to seconds: Double) { if isVOD { mpv.seek(seconds, absolute: true) } }
+    func skip(_ seconds: Double) { if isVOD { mpv.seek(seconds, absolute: false) } }
+
+    private func saveCurrentVOD() {
+        guard let vod, status == .playing, let t = vodTime() else { return }
+        saveVODProgress(vod, t.position, t.duration)
+    }
+
     /// Plays `channel`; `list` is what ↑/↓ step through.
     func play(_ channel: Channel, in list: [Channel]) {
+        if vod != nil { saveCurrentVOD(); vod = nil; progressTask?.cancel(); mpv.set("start", "none") }
         self.list = list.isEmpty ? [channel] : list
         self.channel = channel
         if mode == .hidden { mode = .mini }
@@ -128,7 +189,7 @@ final class PlayerModel {
 
     func toggleAirPlay() {
         if airPlay == .off {
-            guard let channel, let url = library.streamURL(channel) else { return }
+            guard let channel, let url = vod?.url ?? library.streamURL(channel) else { return }
             startAirPlay(url)
         } else {
             stopAirPlay(resumeHere: true)
@@ -169,13 +230,15 @@ final class PlayerModel {
         streamer.stop()
         airPlay = .off
         isOnTV = false
-        if resumeHere, let channel { play(channel, in: list) }
+        if resumeHere {
+            if let vod { playVOD(vod) } else if let channel { play(channel, in: list) }
+        }
     }
 
     /// Channel up / down. Steps through the list you played from; when that list is just this channel
     /// (a one-result search, say) it steps through the channel's category instead.
     func step(_ delta: Int) {
-        guard let channel else { return }
+        guard let channel, vod == nil else { return }
         var source = list
         if source.count < 2 || !source.contains(channel) {
             source = library.channels(for: .group(channel.groupID))
@@ -187,7 +250,7 @@ final class PlayerModel {
 
     /// Reloads the stream at the live edge (pausing or buffering a live channel leaves it behind).
     func goLive() {
-        guard let channel, let url = library.streamURL(channel) else { return }
+        guard vod == nil, let channel, let url = library.streamURL(channel) else { return }
         if airPlay != .off { startAirPlay(url); isBehindLive = false; return }
         isBehindLive = false
         status = .loading
@@ -206,10 +269,18 @@ final class PlayerModel {
     }
 
     func retry() {
-        if let channel { play(channel, in: list) }
+        if let vod {
+            var again = vod
+            again.start = vodTime()?.position ?? vod.start
+            playVOD(again)
+        } else if let channel { play(channel, in: list) }
     }
 
     func close() {
+        saveCurrentVOD()
+        progressTask?.cancel()
+        vod = nil
+        mpv.set("start", "none")
         loadTask?.cancel()
         if airPlay != .off { stopAirPlay(resumeHere: false) }
         PlayerLog.write("close")
@@ -222,10 +293,10 @@ final class PlayerModel {
     }
 
     /// Some provider channels accept the connection and never send a frame.
-    private func watchForStall(_ channel: Channel) {
+    private func watchForStall(_ channel: Channel, seconds: Double = 12) {
         timeoutTask?.cancel()
         timeoutTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(12))
+            try? await Task.sleep(for: .seconds(seconds))
             guard let self, !Task.isCancelled, self.channel == channel, status == .loading else { return }
             PlayerLog.write("no response after 12s, stopping \(channel.id)")
             mpv.stop()
@@ -249,7 +320,7 @@ final class PlayerModel {
         case .playing:
             status = .playing
             isBuffering = false
-            if let channel { measure(channel) }
+            if let channel, vod == nil { measure(channel) }
         case .buffering(let b):
             isBuffering = b
             if b && status == .playing { isBehindLive = true }
@@ -260,7 +331,19 @@ final class PlayerModel {
             PlayerLog.write("failed: \(msg) \(channel?.id ?? "")")
             // Right after switching, the provider often still counts the previous stream against the
             // one-connection limit and refuses. Give it a moment and try once more before giving up.
-            if autoRetries == 0, let channel, let url = library.streamURL(channel), airPlay == .off {
+            if autoRetries == 0, let vod, airPlay == .off {
+                autoRetries = 1
+                status = .loading
+                loadTask?.cancel()
+                loadTask = Task { [weak self] in
+                    try? await Task.sleep(for: .milliseconds(1500))
+                    guard let self, !Task.isCancelled, self.vod == vod else { return }
+                    open(vod.url)
+                    watchForStall(self.channel!, seconds: 25)
+                }
+                return
+            }
+            if autoRetries == 0, vod == nil, let channel, let url = library.streamURL(channel), airPlay == .off {
                 autoRetries = 1
                 status = .loading
                 loadTask?.cancel()
@@ -274,6 +357,10 @@ final class PlayerModel {
                 return
             }
             status = .failed(msg == "loading failed" ? "This channel isn't available right now." : msg.capitalizedFirst)
+        case .ended where vod != nil:
+            // The movie / episode finished: mark it watched and close.
+            if let vod, let d = mpv.double("duration") { saveVODProgress(vod, d, d) }
+            close()
         case .ended:
             // Live streams shouldn't end. Reconnect, but at most twice: a provider that keeps cutting
             // the stream (e.g. over its connection limit) must not be hammered in a loop.

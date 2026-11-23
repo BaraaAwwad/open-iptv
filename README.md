@@ -7,6 +7,7 @@ A fast, native macOS IPTV player. Add an **Xtream Codes** account or an **M3U** 
 - **Organized:** provider categories are grouped by prefix (`ARABIC …`, `EU …`, …), filler "channels" like `===== SPORTS =====` are hidden, and country tags like `|UK|` are stripped from tile names.
 - **Search:** results update as you type, ignore case and accents, and list names that start with your query first. Press Return to play the top result.
 - **Home:** Continue Watching and Favorites shelves, then every category as a card.
+- **Movies & Series:** your provider's on-demand library with posters, backdrops, plot, cast, director, genre, runtime and the file's real resolution / HDR / codecs. Series have seasons and episode lists. Playback has a scrubber, ±10 s skip and resume.
 - **My Playlists:** make your own lists of channels (Favorites is always first). Add channels with the + button in the player or by right-clicking any channel. Playlists sit on the left and their channels on the right, so switching is instant.
 - **AirPlay:** send any channel to an Apple TV or AirPlay TV. Your provider's stream is repackaged to HLS on the fly (needs `ffmpeg`, which comes with `brew install mpv`).
 - **Picture in picture:** channels start in a floating player you can drag to any corner, then expand to fill the window.

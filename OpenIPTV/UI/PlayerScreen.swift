@@ -115,11 +115,23 @@ struct PlayerScreen: View {
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
-        .onKeyPress(.upArrow) { player.step(-1); showControls(); return .handled }
-        .onKeyPress(.downArrow) { player.step(1); showControls(); return .handled }
+        .onKeyPress(.upArrow) {
+            if player.isVOD { player.volume = min(130, player.volume + 5) } else { player.step(-1) }
+            showControls(); return .handled
+        }
+        .onKeyPress(.downArrow) {
+            if player.isVOD { player.volume = max(0, player.volume - 5) } else { player.step(1) }
+            showControls(); return .handled
+        }
         .onKeyPress(.space) { player.togglePause(); showControls(); return .handled }
-        .onKeyPress(.leftArrow) { player.volume = max(0, player.volume - 5); showControls(); return .handled }
-        .onKeyPress(.rightArrow) { player.volume = min(130, player.volume + 5); showControls(); return .handled }
+        .onKeyPress(.leftArrow) {
+            if player.isVOD { player.skip(-10) } else { player.volume = max(0, player.volume - 5) }
+            showControls(); return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            if player.isVOD { player.skip(10) } else { player.volume = min(130, player.volume + 5) }
+            showControls(); return .handled
+        }
         .onKeyPress(characters: .init(charactersIn: "mfsi")) { press in
             switch press.characters {
             case "i": showInfo.toggle()
@@ -171,12 +183,24 @@ struct PlayerScreen: View {
         HStack(spacing: 34) {
             roundButton(player.isPaused ? "play.fill" : "pause.fill", size: 84, icon: 32, help: "Pause (Space)") { player.togglePause() }
                 .overlay(alignment: .leading) {
-                    ChannelButton(up: true, size: 60) { player.step(-1); showControls() }
-                        .offset(x: -94)
+                    Group {
+                        if player.isVOD {
+                            roundButton("gobackward.10", size: 60, icon: 22, help: "Back 10 seconds (←)") { player.skip(-10) }
+                        } else {
+                            ChannelButton(up: true, size: 60) { player.step(-1); showControls() }
+                        }
+                    }
+                    .offset(x: -94)
                 }
                 .overlay(alignment: .trailing) {
-                    ChannelButton(up: false, size: 60) { player.step(1); showControls() }
-                        .offset(x: 94)
+                    Group {
+                        if player.isVOD {
+                            roundButton("goforward.10", size: 60, icon: 22, help: "Forward 10 seconds (→)") { player.skip(10) }
+                        } else {
+                            ChannelButton(up: false, size: 60) { player.step(1); showControls() }
+                        }
+                    }
+                    .offset(x: 94)
                 }
         }
     }
@@ -221,9 +245,10 @@ struct PlayerScreen: View {
             if let channel = player.channel {
                 HStack(alignment: .bottom, spacing: 14) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(library.groupName(channel.groupID).titleCased.uppercased())
+                        Text((player.vod?.subtitle ?? library.groupName(channel.groupID).titleCased).uppercased())
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.white.opacity(0.6))
+                            .lineLimit(1)
                         Text(channel.displayName)
                             .font(.system(size: 26, weight: .bold))
                             .lineLimit(1)
@@ -235,8 +260,13 @@ struct PlayerScreen: View {
                         }
                     }
                     Spacer()
-                    LivePill { player.goLive(); showControls() }
-                    AddToPlaylistButton(channel: channel, size: 40)
+                    if !player.isVOD {
+                        LivePill { player.goLive(); showControls() }
+                        AddToPlaylistButton(channel: channel, size: 40)
+                    }
+                }
+                if player.isVOD {
+                    Scrubber()
                 }
             }
         }
@@ -468,4 +498,47 @@ final class HideTimer {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: w)
     }
     func cancel() { work?.cancel() }
+}
+
+/// Movie / episode progress you can drag: elapsed, bar, remaining.
+struct Scrubber: View {
+    @Environment(PlayerModel.self) private var player
+    var compact = false
+    @State private var dragging: Double?
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+            let t = player.vodTime()
+            let position = dragging ?? t?.position ?? 0
+            let duration = t?.duration ?? 0
+            if compact {
+                GeometryReader { geo in
+                    Capsule().fill(.white.opacity(0.25))
+                        .overlay(alignment: .leading) {
+                            Capsule().fill(.white).frame(width: duration > 0 ? geo.size.width * position / duration : 0)
+                        }
+                }
+                .frame(height: 3)
+            } else {
+                HStack(spacing: 12) {
+                    Text(Self.format(position)).monospacedDigit()
+                    Slider(value: Binding(get: { position }, set: { dragging = $0 }), in: 0...max(duration, 1)) { editing in
+                        if !editing, let d = dragging { player.seek(to: d); dragging = nil }
+                    }
+                    .controlSize(.small)
+                    .tint(.white)
+                    Text("-" + Self.format(max(0, duration - position))).monospacedDigit()
+                }
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .glassCapsule()
+            }
+        }
+    }
+
+    static func format(_ s: Double) -> String {
+        let t = Int(s)
+        return t >= 3600 ? String(format: "%d:%02d:%02d", t / 3600, t % 3600 / 60, t % 60) : String(format: "%d:%02d", t / 60, t % 60)
+    }
 }

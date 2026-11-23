@@ -72,6 +72,10 @@ struct MiniPlayer: View {
                 controls.transition(.opacity)
             }
         }
+        .overlay(alignment: .bottom) {
+            // Thin progress line for movies / episodes.
+            if player.isVOD { Scrubber(compact: true).padding(.horizontal, 10).padding(.bottom, 6) }
+        }
         .frame(width: width, height: width * 9 / 16)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay {
@@ -121,8 +125,10 @@ struct MiniPlayer: View {
                         .foregroundStyle(.white)
                         .lineLimit(1)
                     Spacer()
-                    LivePill(compact: true) { player.goLive() }
-                    if let channel = player.channel { AddToPlaylistButton(channel: channel, size: 28) }
+                    if !player.isVOD {
+                        LivePill(compact: true) { player.goLive() }
+                        if let channel = player.channel { AddToPlaylistButton(channel: channel, size: 28) }
+                    }
                     circle(player.isMuted || player.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill", 28, help: "Mute") {
                         player.isMuted.toggle()
                     }
@@ -131,9 +137,17 @@ struct MiniPlayer: View {
             .padding(10)
             if player.status == .playing {
                 HStack(spacing: 16) {
-                    ChannelButton(up: true, size: 34) { player.step(-1) }
+                    if player.isVOD {
+                        circle("gobackward.10", 34, help: "Back 10 seconds") { player.skip(-10) }
+                    } else {
+                        ChannelButton(up: true, size: 34) { player.step(-1) }
+                    }
                     circle(player.isPaused ? "play.fill" : "pause.fill", 46, help: "Pause") { player.togglePause() }
-                    ChannelButton(up: false, size: 34) { player.step(1) }
+                    if player.isVOD {
+                        circle("goforward.10", 34, help: "Forward 10 seconds") { player.skip(10) }
+                    } else {
+                        ChannelButton(up: false, size: 34) { player.step(1) }
+                    }
                 }
             }
         }

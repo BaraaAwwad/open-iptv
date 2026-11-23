@@ -184,7 +184,7 @@ final class Library {
 
     func channels(for item: SidebarItem) -> [Channel] {
         switch item {
-        case .home, .playlists: []
+        case .home, .playlists, .movies, .series: []
         case .all: channels
         case .favorites: favorites.compactMap { byID[$0] }
         case .recents: recents.compactMap { byID[$0] }
@@ -196,6 +196,8 @@ final class Library {
         switch item {
         case .home: "Home"
         case .playlists: "My Playlists"
+        case .movies: "Movies"
+        case .series: "Series"
         case .all: "All Channels"
         case .favorites: "Favorites"
         case .recents: "Recently Watched"
