@@ -1,34 +1,88 @@
 import SwiftUI
 
+enum ViewMode: String, CaseIterable {
+    case grid, list
+    var icon: String { self == .grid ? "square.grid.2x2" : "list.bullet" }
+    var label: String { self == .grid ? "Grid" : "List" }
+}
+
 struct BrowserView: View {
     @Environment(Library.self) private var library
     @Environment(PlayerModel.self) private var player
-    @State private var selection: SidebarItem? = .all
+    @AppStorage("viewMode") private var viewMode: ViewMode = .grid
+    @State private var selection: SidebarItem? = .home
     @State private var query = ""
     @State private var expanded: Set<String> = []
+    @State private var nav = Navigator()
 
-    private var item: SidebarItem { selection ?? .all }
+    private var item: SidebarItem { selection ?? .home }
     private var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
         let shown = isSearching ? library.search(query) : library.channels(for: item)
         NavigationSplitView {
             Sidebar(selection: $selection, expanded: $expanded)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
+                .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 320)
         } detail: {
-            ChannelGrid(
+            if item == .home && !isSearching {
+                HomeView(selection: $selection, nav: nav)
+            } else {
+            ChannelBrowser(
                 channels: shown,
-                title: isSearching ? "Results" : library.title(for: item),
+                title: isSearching ? "Results" : library.title(for: item).titleCased,
                 emptyMessage: emptyMessage,
-                scrollID: isSearching ? "search" : "\(item)"
+                scrollID: isSearching ? "search" : "\(item)",
+                showGroup: isSearching || !isGroup,
+                mode: viewMode,
+                nav: nav
             )
+            }
         }
         .searchable(text: $query, placement: .toolbar, prompt: "Search channels")
-        .onSubmit(of: .search) {
-            if let first = shown.first { player.play(first, in: shown) }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if item != .home || isSearching {
+                Picker("View", selection: $viewMode) {
+                    ForEach(ViewMode.allCases, id: \.self) { m in
+                        Label(m.label, systemImage: m.icon).tag(m)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelStyle(.iconOnly)
+                .help("Grid or list (⌘1 / ⌘2)")
+                }
+            }
         }
         .toolbar(player.isPresented ? .hidden : .visible, for: .windowToolbar)
         .navigationTitle("")
+        .onAppear {
+            nav.isActive = { !player.isPresented }
+            nav.onPlay = { channel, list in player.play(channel, in: list) }
+            nav.query = { query }
+            nav.setQuery = { query = $0 }
+            nav.install()
+        }
+        .onChange(of: "\(query)|\(item)|\(library.channels.count)|\(library.favorites.count)", initial: true) {
+            nav.setItems(shown, focusFirst: isSearching)
+        }
+        .onChange(of: player.channel?.id) { _, id in
+            // Coming back from the player, focus stays on what you watched.
+            if let id, nav.items.contains(where: { $0.id == id }) {
+                nav.focusID = id
+                nav.scrollTarget = id
+            }
+        }
+        .onChange(of: selection) { query = "" }
+        .onChange(of: viewMode) {
+            let id = nav.focusID
+            nav.scrollTarget = nil
+            DispatchQueue.main.async { nav.scrollTarget = id }
+        }
+    }
+
+    private var isGroup: Bool {
+        if case .group = item { return true }
+        return false
     }
 
     private var emptyMessage: String {
@@ -36,7 +90,7 @@ struct BrowserView: View {
         if library.isLoading && library.channels.isEmpty { return "Loading channels…" }
         if let e = library.loadError, library.channels.isEmpty { return e }
         switch item {
-        case .favorites: return "Right-click a channel and choose Add to Favorites."
+        case .favorites: return "Right-click a channel, or press S while watching, to add it here."
         case .recents: return "Channels you watch show up here."
         default: return "No channels."
         }
@@ -51,14 +105,17 @@ struct Sidebar: View {
     var body: some View {
         List(selection: $selection) {
             Section {
+                row("Home", "house", .home, nil)
                 row("All Channels", "square.grid.2x2", .all, library.channels.count)
+            }
+            Section("Library") {
                 row("Favorites", "star", .favorites, library.favorites.count)
                 row("Recently Watched", "clock", .recents, nil)
             }
             ForEach(library.sections) { section in
-                Section(section.title, isExpanded: binding(section.id)) {
+                Section(section.title.titleCased, isExpanded: binding(section.id)) {
                     ForEach(section.groups, id: \.group.id) { entry in
-                        Text(entry.label)
+                        Text(entry.label.titleCased)
                             .lineLimit(1)
                             .badge(library.byGroup[entry.group.id]?.count ?? 0)
                             .tag(SidebarItem.group(entry.group.id))
@@ -67,7 +124,7 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) { SourceBar() }
+        .safeAreaInset(edge: .bottom, spacing: 0) { SourceBar() }
     }
 
     private func row(_ title: String, _ icon: String, _ tag: SidebarItem, _ count: Int?) -> some View {
@@ -89,36 +146,43 @@ struct SourceBar: View {
     @Environment(Library.self) private var library
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
+            Text(initials)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(LinearGradient(colors: [.blue, .indigo], startPoint: .topLeading, endPoint: .bottomTrailing), in: Circle())
             if library.sources.count > 1 {
                 Menu {
                     ForEach(library.sources) { s in
                         Button(s.name) { Task { await library.activate(s.id) } }
                     }
                 } label: {
-                    Text(library.active?.name ?? "").lineLimit(1)
+                    Text(library.active?.name ?? "").font(.callout.weight(.semibold)).lineLimit(1)
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
             } else {
-                Text(library.active?.name ?? "").lineLimit(1).font(.callout.weight(.medium))
+                Text(library.active?.name ?? "").font(.callout.weight(.semibold)).lineLimit(1)
             }
             Spacer(minLength: 4)
             if library.isLoading {
                 ProgressView().controlSize(.small)
             } else {
                 Button { Task { await library.refresh() } } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Image(systemName: "arrow.clockwise").foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
                 .help(updatedText)
             }
         }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .overlay(alignment: .top) { Divider() }
-        .background(.bar)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    private var initials: String {
+        let words = (library.active?.name ?? "TV").split(separator: " ")
+        return words.prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
     }
 
     private var updatedText: String {

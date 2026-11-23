@@ -9,6 +9,7 @@ final class PlayerModel {
     @ObservationIgnored lazy var videoView = MPVVideoView(mpv: mpv)
     @ObservationIgnored private let library: Library
     @ObservationIgnored private var epgTask: Task<Void, Never>?
+    @ObservationIgnored private var timeoutTask: Task<Void, Never>?
 
     var isPresented = false
     private(set) var channel: Channel?
@@ -46,6 +47,7 @@ final class PlayerModel {
         isPaused = false
         programmes = []
         mpv.load(url)
+        watchForStall(channel)
         library.markWatched(channel)
         loadEPG(channel)
     }
@@ -68,9 +70,21 @@ final class PlayerModel {
     func close() {
         mpv.stop()
         epgTask?.cancel()
+        timeoutTask?.cancel()
         isPresented = false
         status = .idle
         channel = nil
+    }
+
+    /// Some provider channels accept the connection and never send a frame.
+    private func watchForStall(_ channel: Channel) {
+        timeoutTask?.cancel()
+        timeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(12))
+            guard let self, !Task.isCancelled, self.channel == channel, status == .loading else { return }
+            mpv.stop()
+            status = .failed("This channel isn't responding.")
+        }
     }
 
     private func loadEPG(_ channel: Channel) {

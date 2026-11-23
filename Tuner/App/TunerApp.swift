@@ -22,6 +22,7 @@ struct TunerApp: App {
         .defaultSize(width: 1280, height: 800)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            ViewModeCommands()
             CommandMenu("Channels") {
                 Button("Refresh Channel List") { Task { await library.refresh() } }
                     .keyboardShortcut("r")
@@ -56,5 +57,17 @@ struct RootView: View {
         }
         .animation(.easeOut(duration: 0.2), value: player.isPresented)
         .task { await library.load() }
+    }
+}
+
+struct ViewModeCommands: Commands {
+    @AppStorage("viewMode") private var viewMode: ViewMode = .grid
+
+    var body: some Commands {
+        CommandGroup(before: .sidebar) {
+            Button("as Grid") { viewMode = .grid }.keyboardShortcut("1")
+            Button("as List") { viewMode = .list }.keyboardShortcut("2")
+            Divider()
+        }
     }
 }

@@ -6,7 +6,19 @@ A fast, native macOS IPTV player. Add an **Xtream Codes** account or an **M3U** 
 - **Fast with big lists:** tested with 13,000 channels. The catalog is cached on disk, so launch is instant, and it refreshes in the background every 12 hours (or with ⌘R).
 - **Organized:** provider categories are grouped by prefix (`ARABIC …`, `EU …`, …), filler "channels" like `===== SPORTS =====` are hidden, and country tags like `|UK|` are stripped from tile names.
 - **Search:** results update as you type, ignore case and accents, and list names that start with your query first. Press Return to play the top result.
-- **Player:** controls appear only when the mouse moves. If the guide has data, the channel's now / next shows there.
+- **Home:** Continue Watching and Favorites shelves, then every category as a card.
+- **Grid or list:** big logo tiles, or a compact list when the name matters more than the logo.
+- **Player:** glass controls appear only when the mouse moves and fade about a second after it stops. If the guide has data, the channel's now / next shows there.
+
+## Keys (browsing)
+
+| Key | Action |
+| --- | --- |
+| Arrows | Move between channels (→ from the sidebar enters the grid, ← at the edge goes back) |
+| Return | Play the highlighted channel |
+| Just type | Search; Backspace edits, Esc clears |
+| ⌘1 / ⌘2 | Grid or list view |
+| ⌘R | Refresh the channel list |
 
 ## Keys (while playing)
 

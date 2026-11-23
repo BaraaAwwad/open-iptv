@@ -12,30 +12,48 @@ struct PlayerScreen: View {
     @Environment(Library.self) private var library
     @State private var controlsVisible = true
     @State private var hideTask: Task<Void, Never>?
+    @State private var overControls = false
     @FocusState private var focused: Bool
 
     var body: some View {
         ZStack {
             Color.black
             VideoSurface(view: player.videoView)
+            // Double-click to toggle full screen; kept behind the controls so it never delays their clicks.
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { toggleFullScreen() }
 
-            centerState
+            if controlsVisible {
+                LinearGradient(colors: [.black.opacity(0.45), .clear, .clear, .black.opacity(0.7)],
+                               startPoint: .top, endPoint: .bottom)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+
+            statusOverlay
 
             if controlsVisible {
                 VStack(spacing: 0) {
-                    topBar
+                    topBar.onHover { overControls = $0 }
                     Spacer()
-                    bottomBar
+                    bottomBar.onHover { overControls = $0 }
                 }
+                .padding(.horizontal, 22)
+                .padding(.top, isFullScreen ? 18 : 40)
+                .padding(.bottom, 22)
                 .transition(.opacity)
             }
         }
         .ignoresSafeArea()
+        .environment(\.colorScheme, .dark)
         .contentShape(Rectangle())
         .onContinuousHover { phase in
-            if case .active = phase { showControls() }
+            switch phase {
+            case .active: showControls()
+            case .ended: hideControls(after: 0.3)
+            }
         }
-        .onTapGesture(count: 2) { NSApp.keyWindow?.toggleFullScreen(nil) }
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
@@ -47,7 +65,7 @@ struct PlayerScreen: View {
         .onKeyPress(characters: .init(charactersIn: "mfs")) { press in
             switch press.characters {
             case "m": player.isMuted.toggle()
-            case "f": NSApp.keyWindow?.toggleFullScreen(nil)
+            case "f": toggleFullScreen()
             case "s": if let c = player.channel { library.toggleFavorite(c) }
             default: break
             }
@@ -56,134 +74,224 @@ struct PlayerScreen: View {
         }
         .onExitCommand { exit() }
         .onAppear { focused = true; showControls() }
+        .onChange(of: player.status) { _, status in
+            if status == .playing { hideControls(after: 1.2) } else { controlsVisible = true }
+        }
         .onDisappear { hideTask?.cancel(); NSCursor.setHiddenUntilMouseMoves(false) }
-        .animation(.easeInOut(duration: 0.25), value: controlsVisible)
+        .animation(.easeInOut(duration: 0.22), value: controlsVisible)
     }
 
-    // MARK: Pieces
+    // MARK: Center
 
-    @ViewBuilder private var centerState: some View {
+    @ViewBuilder private var statusOverlay: some View {
         switch player.status {
         case .loading:
             ProgressView().controlSize(.large).tint(.white)
         case .failed(let message):
-            VStack(spacing: 14) {
+            VStack(spacing: 16) {
                 Image(systemName: "tv.slash").font(.system(size: 40, weight: .light))
-                Text(message).font(.title3)
-                HStack {
-                    Button("Try Again") { player.retry() }
-                    Button("Next Channel") { player.step(1) }
+                Text(message).font(.title3.weight(.medium))
+                HStack(spacing: 10) {
+                    pill("Try Again", "arrow.clockwise") { player.retry() }
+                    pill("Next Channel", "forward.end.fill") { player.step(1) }
                 }
-                .controlSize(.large)
             }
-            .foregroundStyle(.white.opacity(0.85))
+            .foregroundStyle(.white.opacity(0.9))
         default:
-            if player.isBuffering { ProgressView().controlSize(.large).tint(.white) }
+            if player.isBuffering {
+                ProgressView().controlSize(.large).tint(.white)
+            } else if controlsVisible {
+                transport.onHover { overControls = $0 }
+                    .transition(.opacity)
+            }
         }
     }
+
+    private var transport: some View {
+        HStack(spacing: 34) {
+            roundButton(player.isPaused ? "play.fill" : "pause.fill", size: 84, icon: 32, help: "Pause (Space)") { player.togglePause() }
+                .overlay(alignment: .leading) {
+                    roundButton("backward.end.fill", size: 60, icon: 18, help: "Previous channel (↑)") { player.step(-1) }
+                        .offset(x: -94)
+                }
+                .overlay(alignment: .trailing) {
+                    roundButton("forward.end.fill", size: 60, icon: 18, help: "Next channel (↓)") { player.step(1) }
+                        .offset(x: 94)
+                }
+        }
+    }
+
+    // MARK: Top
 
     private var topBar: some View {
-        HStack {
-            Button { exit() } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 34, height: 34)
-                    .background(.ultraThinMaterial, in: Circle())
+        HStack(alignment: .top) {
+            HStack(spacing: 2) {
+                capsuleButton("chevron.left", help: "Back to channels (Esc)") { player.close() }
+                capsuleButton(isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                              help: "Full screen (F)") { toggleFullScreen() }
             }
-            .buttonStyle(.plain)
-            .help("Back (Esc)")
+            .padding(4)
+            .glassCapsule()
+
             Spacer()
+
+            HStack(spacing: 10) {
+                Slider(value: Binding(get: { player.isMuted ? 0 : player.volume },
+                                      set: { player.volume = $0; player.isMuted = false }), in: 0...130)
+                    .frame(width: 120)
+                    .controlSize(.small)
+                    .tint(.white)
+                capsuleButton(volumeIcon, help: "Mute (M)") { player.isMuted.toggle() }
+            }
+            .padding(.leading, 16)
+            .padding(4)
+            .glassCapsule()
         }
-        .padding(.top, isFullScreen ? 20 : 40)
-        .padding(.horizontal, 24)
     }
 
+    // MARK: Bottom
+
     private var bottomBar: some View {
-        HStack(alignment: .center, spacing: 18) {
+        VStack(alignment: .leading, spacing: 12) {
             if let channel = player.channel {
-                LogoView(channel: channel)
-                    .frame(width: 92, height: 52)
-                    .background(Tile.background, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 8) {
-                        Text(channel.displayName).font(.title3.weight(.semibold))
-                        if library.isFavorite(channel) {
-                            Image(systemName: "star.fill").font(.caption).foregroundStyle(.yellow)
-                        }
+                HStack(alignment: .bottom, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(library.groupName(channel.groupID).titleCased.uppercased())
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.6))
+                        Text(channel.displayName)
+                            .font(.system(size: 26, weight: .bold))
+                            .lineLimit(1)
                     }
-                    if let now = player.programmes.first {
-                        HStack(spacing: 10) {
-                            Text(now.title).lineLimit(1)
-                            ProgressView(value: now.progress).frame(width: 90).tint(.white)
-                            Text(now.end, style: .time).foregroundStyle(.white.opacity(0.6))
+                    Spacer()
+                    HStack(spacing: 2) {
+                        capsuleButton(library.isFavorite(channel) ? "star.fill" : "star", help: "Favorite (S)") {
+                            library.toggleFavorite(channel)
                         }
-                        .font(.callout)
+                        .foregroundStyle(library.isFavorite(channel) ? .yellow : .white)
+                    }
+                    .padding(4)
+                    .glassCapsule()
+                }
+                if let now = player.programmes.first {
+                    HStack(spacing: 12) {
+                        Text(now.start, style: .time).monospacedDigit()
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(now.title).font(.callout.weight(.semibold)).lineLimit(1)
+                            ProgressView(value: now.progress).tint(.white).controlSize(.small)
+                        }
+                        Text(now.end, style: .time).monospacedDigit()
                         if player.programmes.count > 1 {
+                            Divider().frame(height: 26)
                             Text("Next: \(player.programmes[1].title)")
-                                .font(.caption).foregroundStyle(.white.opacity(0.6)).lineLimit(1)
+                                .lineLimit(1)
+                                .foregroundStyle(.white.opacity(0.7))
+                                .frame(maxWidth: 260, alignment: .leading)
                         }
-                    } else {
-                        Text(library.groupName(channel.groupID))
-                            .font(.callout).foregroundStyle(.white.opacity(0.6))
                     }
-                }
-            }
-            Spacer(minLength: 20)
-            HStack(spacing: 6) {
-                iconButton("chevron.up", "Previous channel (↑)") { player.step(-1) }
-                iconButton("chevron.down", "Next channel (↓)") { player.step(1) }
-                iconButton(player.isMuted || player.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill", "Mute (M)") {
-                    player.isMuted.toggle()
-                }
-                Slider(value: Binding(get: { player.volume }, set: { player.volume = $0; player.isMuted = false }), in: 0...130)
-                    .frame(width: 90)
-                    .controlSize(.small)
-                iconButton(isFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right", "Full screen (F)") {
-                    NSApp.keyWindow?.toggleFullScreen(nil)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .glassCapsule()
                 }
             }
         }
         .foregroundStyle(.white)
-        .padding(.horizontal, 28)
-        .padding(.top, 40)
-        .padding(.bottom, 26)
-        .background(
-            LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
-                .allowsHitTesting(false)
-        )
     }
 
-    private func iconButton(_ symbol: String, _ help: String, action: @escaping () -> Void) -> some View {
+    // MARK: Building blocks
+
+    private var volumeIcon: String {
+        if player.isMuted || player.volume == 0 { return "speaker.slash.fill" }
+        return player.volume < 50 ? "speaker.wave.1.fill" : "speaker.wave.3.fill"
+    }
+
+    private func capsuleButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: { action(); showControls() }) {
             Image(systemName: symbol)
                 .font(.system(size: 14, weight: .semibold))
-                .frame(width: 32, height: 32)
+                .frame(width: 34, height: 30)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .foregroundStyle(.white)
         .help(help)
+    }
+
+    private func roundButton(_ symbol: String, size: CGFloat, icon: CGFloat, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: { action(); showControls() }) {
+            Image(systemName: symbol)
+                .font(.system(size: icon, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .glassCircle()
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressScale())
+        .help(help)
+    }
+
+    private func pill(_ title: String, _ symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.callout.weight(.semibold))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .glassCapsule()
+        }
+        .buttonStyle(PressScale())
     }
 
     // MARK: Behaviour
 
     private var isFullScreen: Bool { NSApp.keyWindow?.styleMask.contains(.fullScreen) ?? false }
 
+    private func toggleFullScreen() { NSApp.keyWindow?.toggleFullScreen(nil) }
+
     private func showControls() {
         controlsVisible = true
+        hideControls(after: 1.2)
+    }
+
+    private func hideControls(after seconds: Double) {
         hideTask?.cancel()
         hideTask = Task {
-            try? await Task.sleep(for: .seconds(2.5))
-            guard !Task.isCancelled, player.status == .playing else { return }
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled, player.status == .playing, !overControls else { return }
             controlsVisible = false
             NSCursor.setHiddenUntilMouseMoves(true)
         }
     }
 
     private func exit() {
-        if isFullScreen {
-            NSApp.keyWindow?.toggleFullScreen(nil)
+        if isFullScreen { toggleFullScreen() } else { player.close() }
+    }
+}
+
+struct PressScale: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
+extension View {
+    /// Liquid Glass on macOS 26+, a dark material before that.
+    @ViewBuilder func glassCapsule() -> some View {
+        if #available(macOS 26.0, *) {
+            self.glassEffect(.regular, in: Capsule())
         } else {
-            player.close()
+            self.background(.ultraThinMaterial, in: Capsule())
+        }
+    }
+
+    @ViewBuilder func glassCircle() -> some View {
+        if #available(macOS 26.0, *) {
+            self.glassEffect(.regular.interactive(), in: Circle())
+        } else {
+            self.background(.ultraThinMaterial, in: Circle())
         }
     }
 }

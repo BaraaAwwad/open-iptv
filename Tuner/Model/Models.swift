@@ -43,7 +43,7 @@ struct Channel: Codable, Identifiable, Hashable {
     func hash(into h: inout Hasher) { h.combine(id) }
 
     /// Name without the provider's country tag (`|UK| `, `UK | `, `LATIN: `) for display.
-    var displayName: String { Self.stripTag(name) }
+    var displayName: String { Self.stripTag(name).titleCased }
 
     static func stripTag(_ s: String) -> String {
         let trimmed = s.trimmingCharacters(in: .whitespaces)
@@ -85,7 +85,7 @@ struct Programme: Hashable {
 }
 
 enum SidebarItem: Hashable {
-    case all, favorites, recents
+    case home, all, favorites, recents
     case group(String)
 }
 
@@ -94,4 +94,30 @@ struct GroupSection: Identifiable {
     let id: String
     let title: String
     let groups: [(group: ChannelGroup, label: String)]
+}
+
+extension String {
+    /// Providers send names in ALL CAPS. "BEIN SPORTS 1 HD" → "beIN Sports 1 HD", "BBC ONE" → "BBC One".
+    /// Short words (MBC, CNN, HD) and quality tags keep their capitals; mixed-case names are left alone.
+    var titleCased: String {
+        let letters = unicodeScalars.filter { CharacterSet.letters.contains($0) }
+        guard !letters.isEmpty, uppercased() == self, lowercased() != self else { return self }
+        return split(separator: " ", omittingEmptySubsequences: false).map { word -> String in
+            let w = String(word)
+            let core = w.filter(\.isLetter)
+            if let special = Self.specialWords[core] { return w.replacingOccurrences(of: core, with: special) }
+            if (core.count <= 3 && !Self.commonWords.contains(core)) || Self.keepCaps.contains(core) || w.contains(where: \.isNumber) { return w }
+            return w.prefix(1) + w.dropFirst().lowercased()
+        }.joined(separator: " ")
+    }
+
+    private static let keepCaps: Set<String> = [
+        "HEVC", "UHD", "FHD", "HDR", "ESPN", "DAZN", "CNBC", "DSTV", "EXYU", "MSNBC", "OSN",
+        "TVRI", "TRT", "BFM", "RMC", "SSC", "BEINSPORT",
+    ]
+    private static let commonWords: Set<String> = [
+        "ONE", "TWO", "SIX", "TEN", "THE", "NEW", "ALL", "BOX", "MAX", "FUN", "PRO", "TOP", "AND", "FOX",
+        "KIDS", "BIG", "OLD", "DAY", "WAR", "SEA", "SUN", "CAR", "LAW", "ZEE", "GEO", "BIO",
+    ]
+    private static let specialWords: [String: String] = ["BEIN": "beIN", "BEINSPORT": "beINSport", "PLUS": "Plus"]
 }

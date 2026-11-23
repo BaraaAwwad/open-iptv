@@ -91,15 +91,19 @@ struct XtreamClient {
 
     /// Now / next for one channel.
     func shortEPG(_ streamID: Int) async -> [Programme] {
-        guard let obj = try? await json("get_short_epg", [.init(name: "stream_id", value: String(streamID)), .init(name: "limit", value: "3")]),
+        guard let obj = try? await json("get_short_epg", [.init(name: "stream_id", value: String(streamID)), .init(name: "limit", value: "6")]),
               let list = (obj as? [String: Any])?["epg_listings"] as? [[String: Any]] else { return [] }
-        return list.compactMap { e in
+        let all = list.compactMap { e -> Programme? in
             guard let t = e["title"] as? String,
                   let start = Self.double(e["start_timestamp"]), let end = Self.double(e["stop_timestamp"]) else { return nil }
             let title = Data(base64Encoded: t).flatMap { String(data: $0, encoding: .utf8) } ?? t
             return Programme(title: title, start: Date(timeIntervalSince1970: start), end: Date(timeIntervalSince1970: end))
         }
-        .filter { $0.end > Date() }
+        // Guides often overlap (a 20-hour block plus the real match); the latest one that has started wins.
+        let now = Date()
+        let current = all.filter { $0.start <= now && $0.end > now }.max { $0.start < $1.start }
+        let upcoming = all.filter { $0.start >= (current?.end ?? now) }.sorted { $0.start < $1.start }
+        return (current.map { [$0] } ?? []) + upcoming
     }
 
     // Panels mix numbers and strings freely.

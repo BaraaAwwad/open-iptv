@@ -1,0 +1,141 @@
+import SwiftUI
+
+/// Home: shelves of what you watch, then every category as a card.
+struct HomeView: View {
+    @Environment(Library.self) private var library
+    @Environment(PlayerModel.self) private var player
+    @Binding var selection: SidebarItem?
+    let nav: Navigator
+
+    private let cardColumns = [GridItem(.adaptive(minimum: 168, maximum: 220), spacing: 22, alignment: .top)]
+
+    var body: some View {
+        let recents = library.channels(for: .recents)
+        let favorites = library.channels(for: .favorites)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 34) {
+                if library.channels.isEmpty {
+                    VStack(spacing: 10) {
+                        if library.isLoading { ProgressView() }
+                        Text(library.loadError ?? "Loading channels…").foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 300)
+                }
+                if !recents.isEmpty {
+                    shelf("Continue Watching", recents, .recents)
+                }
+                if !favorites.isEmpty {
+                    shelf("Favorites", favorites, .favorites)
+                }
+                if !library.groups.isEmpty {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Browse").font(.title2.weight(.bold))
+                        LazyVGrid(columns: cardColumns, spacing: 22) {
+                            ForEach(library.groups) { group in
+                                CategoryCard(group: group, channels: library.byGroup[group.id] ?? []) {
+                                    selection = .group(group.id)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 36)
+            .padding(.top, 22)
+            .padding(.bottom, 40)
+        }
+        .onAppear { nav.setItems([], focusFirst: false) }
+    }
+
+    private func shelf(_ title: String, _ channels: [Channel], _ target: SidebarItem) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button { selection = target } label: {
+                HStack(spacing: 4) {
+                    Text(title).font(.title2.weight(.bold))
+                    Image(systemName: "chevron.right").font(.title3.weight(.bold)).foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 22) {
+                    ForEach(channels.prefix(20)) { channel in
+                        ShelfTile(channel: channel, isFavorite: library.isFavorite(channel)) {
+                            player.play(channel, in: channels)
+                        }
+                        .frame(width: 220)
+                    }
+                }
+                .padding(.vertical, 14)
+                .padding(.horizontal, 4)
+            }
+            .padding(.horizontal, -4)
+            .padding(.vertical, -14)
+        }
+    }
+}
+
+/// A tile that manages its own hover focus (shelves aren't keyboard-navigated).
+private struct ShelfTile: View {
+    let channel: Channel
+    let isFavorite: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        ChannelTile(channel: channel, focused: hovering, isFavorite: isFavorite, action: action)
+            .onHover { hovering = $0 }
+    }
+}
+
+/// Category card: a color drawn from the name, the category's best logo, and its name.
+struct CategoryCard: View {
+    let group: ChannelGroup
+    let channels: [Channel]
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .bottomLeading) {
+                LinearGradient(colors: [color.opacity(0.95), color.opacity(0.55), .black.opacity(0.85)],
+                               startPoint: .topTrailing, endPoint: .bottomLeading)
+                if let sample = channels.first(where: { $0.logo != nil }) {
+                    LogoView(channel: sample)
+                        .padding(28)
+                        .padding(.bottom, 30)
+                        .opacity(0.9)
+                        .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+                }
+                LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .center, endPoint: .bottom)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(group.name.titleCased)
+                        .font(.system(size: 16, weight: .bold))
+                        .lineLimit(2)
+                    Text("\(channels.count) channels")
+                        .font(.caption.weight(.medium))
+                        .opacity(0.7)
+                }
+                .foregroundStyle(.white)
+                .padding(14)
+            }
+            .aspectRatio(3 / 4, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(.white.opacity(hovering ? 0.5 : 0.12), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(hovering ? 0.45 : 0.15), radius: hovering ? 20 : 5, y: hovering ? 12 : 3)
+            .scaleEffect(hovering ? 1.05 : 1)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.spring(response: 0.28, dampingFraction: 0.72), value: hovering)
+    }
+
+    private var color: Color {
+        var h: UInt64 = 1469598103934665603
+        for b in group.name.utf8 { h = (h ^ UInt64(b)) &* 1099511628211 }
+        return Color(hue: Double(h % 360) / 360, saturation: 0.6, brightness: 0.6)
+    }
+}
