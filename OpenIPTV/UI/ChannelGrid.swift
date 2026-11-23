@@ -14,6 +14,8 @@ struct ChannelBrowser: View {
     var selection: SelectionModel
     /// Set when showing one of My Playlists, so channels can be removed from it.
     var playlist: PlaylistRef? = nil
+    /// Page controls (quality filter, select, grid / list) shown at the right of the header.
+    var controls: AnyView = AnyView(EmptyView())
 
     @State private var fittedColumns = 4
 
@@ -28,11 +30,17 @@ struct ChannelBrowser: View {
     var body: some View {
         Group {
             if channels.isEmpty {
-                VStack(spacing: 10) {
-                    if library.isLoading && library.channels.isEmpty { ProgressView() }
-                    Text(emptyMessage).foregroundStyle(.secondary)
+                // Keep the header (and its filter) even when nothing matches, so a filter can be undone.
+                VStack(alignment: .leading, spacing: 0) {
+                    header
+                        .padding(.horizontal, hPad)
+                        .padding(.top, 18)
+                    VStack(spacing: 10) {
+                        if library.isLoading && library.channels.isEmpty { ProgressView() }
+                        Text(emptyMessage).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -77,6 +85,7 @@ struct ChannelBrowser: View {
                 .foregroundStyle(.tertiary)
             Spacer(minLength: 12)
             ScanControl(channels: channels, title: title)
+            controls
         }
     }
 
@@ -102,10 +111,8 @@ struct ChannelBrowser: View {
                 ChannelRow(channel: channel, focused: nav.focusID == channel.id,
                            isFavorite: library.isFavorite(channel),
                            group: showGroup ? library.groupName(channel.groupID).titleCased : nil,
-                           quality: library.quality(channel)) { activate(channel) }
-                    .overlay(alignment: .trailing) {
-                        if selection.isActive { SelectBadge(selected: selection.contains(channel)).padding(.trailing, 40) }
-                    }
+                           quality: library.quality(channel),
+                           selected: selection.isActive ? selection.contains(channel) : nil) { activate(channel) }
                     .onHover { nav.hover(channel.id, $0) }
                     .contextMenu { menu(channel) }
                     .id(channel.id)
@@ -328,11 +335,17 @@ struct ChannelRow: View {
     let isFavorite: Bool
     let group: String?
     var quality: StreamQuality? = nil
+    /// Select mode: the circle at the start of the row (nil when not selecting).
+    var selected: Bool? = nil
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 14) {
+                if let selected {
+                    SelectBadge(selected: selected)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                }
                 ZStack {
                     Tile.background
                     LogoView(channel: channel, monogramSize: 13)

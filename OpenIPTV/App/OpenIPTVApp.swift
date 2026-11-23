@@ -12,6 +12,12 @@ struct OpenIPTVApp: App {
         // The scanner only probes while nothing plays, and drops its probe the moment you press play.
         let scanner = QualityScanner(library: library, isPlayerBusy: { player.mode != .hidden })
         player.willOpenStream = { scanner.yieldToPlayer() }
+        // Switching provider: stop the stream and the scan first, so nothing uses the old provider's
+        // channels with the new provider's login.
+        library.willSwitchSource = {
+            scanner.cancel()
+            player.close()
+        }
         _library = State(initialValue: library)
         _player = State(initialValue: player)
         _scanner = State(initialValue: scanner)
@@ -27,8 +33,11 @@ struct OpenIPTVApp: App {
                 .frame(minWidth: 860, minHeight: 540)
         }
         .defaultSize(width: 1280, height: 800)
+        // No title bar or toolbar: like the TV app, the window is all content (traffic lights float on top).
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            SidebarCommands()
             ViewModeCommands()
             CommandMenu("Channels") {
                 Button("Refresh Channel List") { Task { await library.refresh() } }

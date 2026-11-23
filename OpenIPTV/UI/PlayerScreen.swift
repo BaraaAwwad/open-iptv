@@ -399,7 +399,11 @@ struct PlayerVideo: View {
     let active: Bool
 
     var body: some View {
-        if player.airPlay == .ready {
+        if player.airPlay == .ready && player.isOnTV {
+            // The TV has the picture. Show plain black here (AVKit's own "playing on" screen would
+            // stack under our card).
+            Color.black
+        } else if player.airPlay == .ready {
             AirPlayVideo(player: player.airPlayer)
         } else {
             VideoSurface(view: player.videoView, active: active)

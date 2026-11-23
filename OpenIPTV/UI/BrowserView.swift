@@ -29,6 +29,7 @@ struct BrowserView: View {
         NavigationSplitView {
             Sidebar(selection: $selection, expanded: $expanded)
                 .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 320)
+                .toolbar(removing: .sidebarToggle)
         } detail: {
             if item == .home && !isSearching {
                 HomeView(selection: $selection, nav: nav)
@@ -46,7 +47,8 @@ struct BrowserView: View {
                         mode: viewMode,
                         nav: nav,
                         selection: selecting,
-                        playlist: playlistRef ?? .favorites
+                        playlist: playlistRef ?? .favorites,
+                        controls: AnyView(controls)
                     )
                 }
             } else {
@@ -58,50 +60,14 @@ struct BrowserView: View {
                     showGroup: isSearching || !isGroup,
                     mode: viewMode,
                     nav: nav,
-                    selection: selecting
+                    selection: selecting,
+                    controls: AnyView(controls)
                 )
             }
         }
-        .searchable(text: $query, placement: .toolbar, prompt: "Search channels")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                if item != .home || isSearching {
-                    Menu {
-                        Picker("Quality", selection: $qualityFilter) {
-                            Text("All Qualities").tag(QualityTier?.none)
-                            Divider()
-                            ForEach(QualityTier.allCases) { t in Text(t.rawValue).tag(QualityTier?.some(t)) }
-                        }
-                        .pickerStyle(.inline)
-                    } label: {
-                        Label(qualityFilter?.rawValue ?? "Quality",
-                              systemImage: qualityFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
-                    }
-                    .help("Filter by measured quality (only channels that were played or checked have one)")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                if item != .home || isSearching {
-                    Button(selecting.isActive ? "Done" : "Select") {
-                        if selecting.isActive { selecting.end() } else { selecting.isActive = true }
-                    }
-                    .help("Select several channels to add to or remove from a playlist")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                if item != .home || isSearching {
-                Picker("View", selection: $viewMode) {
-                    ForEach(ViewMode.allCases, id: \.self) { m in
-                        Label(m.label, systemImage: m.icon).tag(m)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelStyle(.iconOnly)
-                .help("Grid or list (⌘1 / ⌘2)")
-                }
-            }
-        }
-        .toolbar(player.isFull ? .hidden : .visible, for: .windowToolbar)
+        // Search lives at the top of the sidebar and the page controls live in each page's header,
+        // so the window has no toolbar to rebuild when switching pages or entering full-screen playback.
+        .searchable(text: $query, placement: .sidebar, prompt: "Search channels")
         .navigationTitle("")
         .onAppear {
             nav.isActive = { !player.isFull }
@@ -129,6 +95,41 @@ struct BrowserView: View {
             nav.scrollTarget = nil
             DispatchQueue.main.async { nav.scrollTarget = id }
         }
+    }
+
+    /// Quality filter, Select, Grid / List: shown in the page header next to the title.
+    private var controls: some View {
+        HStack(spacing: 10) {
+            Menu {
+                Picker("Quality", selection: $qualityFilter) {
+                    Text("All Qualities").tag(QualityTier?.none)
+                    Divider()
+                    ForEach(QualityTier.allCases) { t in Text(t.rawValue).tag(QualityTier?.some(t)) }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Label(qualityFilter?.rawValue ?? "Quality",
+                      systemImage: qualityFilter == nil ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+            }
+            .fixedSize()
+            .help("Filter by measured quality (only channels that were played or checked have one)")
+
+            Button(selecting.isActive ? "Done" : "Select") {
+                if selecting.isActive { selecting.end() } else { selecting.isActive = true }
+            }
+            .help("Select several channels to add to or remove from a playlist")
+
+            Picker("View", selection: $viewMode) {
+                ForEach(ViewMode.allCases, id: \.self) { m in
+                    Label(m.label, systemImage: m.icon).tag(m)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelStyle(.iconOnly)
+            .fixedSize()
+            .help("Grid or list (⌘1 / ⌘2)")
+        }
+        .controlSize(.regular)
     }
 
     private var isGroup: Bool {

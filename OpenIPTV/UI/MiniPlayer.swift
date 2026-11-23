@@ -10,7 +10,7 @@ struct MiniPlayer: View {
 
     private let width: CGFloat = 380
     private let margin: CGFloat = 20
-    private let topInset: CGFloat = 60 // clear the toolbar
+    private let topInset: CGFloat = 92 // clear the page header and its controls
 
     enum Corner: String { case topLeading, topTrailing, bottomLeading, bottomTrailing }
 

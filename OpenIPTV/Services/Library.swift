@@ -91,7 +91,11 @@ final class Library {
         if activeID == id { await activate(sources.first?.id) } else { saveSources() }
     }
 
+    /// Runs before switching provider: the player and the quality scanner must let go of the old one.
+    @ObservationIgnored var willSwitchSource: () -> Void = {}
+
     func activate(_ id: UUID?) async {
+        if id != activeID { willSwitchSource() }
         activeID = id
         saveSources()
         apply(Catalog(groups: [], channels: [], fetchedAt: .distantPast), fetched: nil)
