@@ -74,7 +74,7 @@ final class QualityScanner {
         self.isPlayerBusy = isPlayerBusy
     }
 
-    static var ffprobe: String? {
+    nonisolated static var ffprobe: String? {
         ["/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe"].first(where: FileManager.default.isExecutableFile)
     }
 
@@ -180,5 +180,31 @@ final class QualityScanner {
             checked: Date(),
             ok: true
         )
+    }
+}
+
+/// One-off ffprobe of a stream (8–12 s at most). Used for movies / episodes the provider didn't describe.
+enum StreamProbe {
+    static func measure(_ url: URL) async -> StreamQuality? {
+        guard let ffprobe = QualityScanner.ffprobe else { return nil }
+        return await Task.detached { () -> StreamQuality? in
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: ffprobe)
+            p.arguments = ["-v", "error", "-user_agent", "VLC/3.0.21 LibVLC/3.0.21",
+                           "-rw_timeout", "8000000", "-analyzeduration", "2500000", "-probesize", "3000000",
+                           "-select_streams", "v:0", "-show_entries", "stream=codec_name,width,height,avg_frame_rate",
+                           "-of", "json", url.absoluteString]
+            let out = Pipe()
+            p.standardOutput = out
+            p.standardError = FileHandle.nullDevice
+            do { try p.run() } catch { return nil }
+            let deadline = Date().addingTimeInterval(12)
+            while p.isRunning && Date() < deadline { usleep(200_000) }
+            if p.isRunning { p.terminate(); return nil }
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            guard let v = (((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["streams"] as? [[String: Any]])?.first,
+                  let w = v["width"] as? Int, let h = v["height"] as? Int else { return nil }
+            return StreamQuality(width: w, height: h, fps: nil, codec: v["codec_name"] as? String, checked: Date(), ok: true)
+        }.value
     }
 }

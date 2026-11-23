@@ -23,6 +23,7 @@ struct OpenIPTVApp: App {
         _player = State(initialValue: player)
         _scanner = State(initialValue: scanner)
         let vod = VODStore(library: library)
+        vod.isPlayerBusy = { player.mode != .hidden || scanner.isRunning }
         player.saveVODProgress = { item, position, duration in
             vod.save(item, position: position, duration: duration)
         }

@@ -36,7 +36,9 @@ struct BrowserView: View {
         } detail: {
             if isSearching {
                 // Search covers everything: channels, movies and series.
-                SearchResultsView(query: query, channels: library.search(query), nav: nav)
+                SearchResultsView(query: query,
+                                  channels: library.search(query).filter { vodQuality == nil || library.tier($0).rawValue == vodQuality },
+                                  nav: nav, quality: vodQuality, language: vodLanguage)
             } else if item == .home {
                 HomeView(selection: $selection, nav: nav)
             } else if item == .movies || item == .series {
@@ -91,7 +93,9 @@ struct BrowserView: View {
                             .pickerStyle(.inline)
                             .labelsHidden()
                         }
-                        let langs = VODBrowser.languages(item == .movies ? vod.movieCategories : vod.seriesCategories)
+                        let langs = VODBrowser.languages(item == .movies ? vod.movieCategories
+                                                         : item == .series ? vod.seriesCategories
+                                                         : vod.movieCategories + vod.seriesCategories)
                         Menu("Language: \(vodLanguage.isEmpty ? "All" : VODBrowser.languageName(vodLanguage))") {
                             Picker("Language", selection: $vodLanguage) {
                                 Text("All Languages").tag("")
@@ -182,7 +186,8 @@ struct BrowserView: View {
         }
     }
 
-    private var isVODPage: Bool { !isSearching && (item == .movies || item == .series) }
+    /// Movies / Series pages and the search results use the Quality + Language filter.
+    private var isVODPage: Bool { isSearching || item == .movies || item == .series }
     private var filterActive: Bool { isVODPage ? (vodQuality != nil || !vodLanguage.isEmpty) : qualityFilter != nil }
     private var filterLabel: String {
         if isVODPage {

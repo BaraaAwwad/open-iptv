@@ -493,6 +493,12 @@ final class VODStore {
         runCheck(items.filter { quick($0) == nil }.map { s in { [weak self] in _ = await self?.info(s) } }, title: title)
     }
 
+    func checkAll(_ movies: [Movie], _ series: [Series], title: String) {
+        let m: [() async -> Void] = movies.filter { quick($0) == nil }.map { m in { [weak self] in _ = await self?.info(m) } }
+        let s: [() async -> Void] = series.filter { quick($0) == nil }.map { s in { [weak self] in _ = await self?.info(s) } }
+        runCheck(m + s, title: title)
+    }
+
     func stopCheck() {
         checkTask?.cancel()
         checkTask = nil
@@ -552,15 +558,47 @@ final class VODStore {
     }
 
     private func noteQuick(_ m: Movie, _ i: MovieInfo) {
-        setQuick("m\(m.id)", Quick(tier: i.video?.tier, hdr: i.video?.hdr ?? false, language: i.language))
+        let key = "m\(m.id)", measured = quick[key]?.tier
+        setQuick(key, Quick(tier: i.video?.tier ?? measured, hdr: i.video?.hdr ?? false, language: i.language))
+        if i.video?.tier == nil, measured == nil, let url = url(m) { probe(key, url) }
     }
 
     private func noteQuick(_ s: Series, _ i: SeriesInfo) {
         let eps = i.seasons.flatMap { i.episodes[$0] ?? [] }
         let video = eps.first { $0.video?.height != nil }?.video
-        setQuick("s\(s.id)", Quick(tier: video?.tier, hdr: video?.hdr ?? false,
-                                    language: eps.first { $0.language != nil }?.language,
-                                    seasons: i.seasons.count, episodes: eps.count))
+        let key = "s\(s.id)", measured = quick[key]?.tier
+        setQuick(key, Quick(tier: video?.tier ?? measured, hdr: video?.hdr ?? false,
+                            language: eps.first { $0.language != nil }?.language,
+                            seasons: i.seasons.count, episodes: eps.count))
+        // The provider often leaves quality out: measure the first episode instead (good enough for the series).
+        if video?.tier == nil, measured == nil, let first = eps.first, let url = url(first) { probe(key, url) }
+    }
+
+    // MARK: Measuring streams the provider didn't describe
+
+    /// Set by the app: true while the player uses the provider's (single) stream connection.
+    @ObservationIgnored var isPlayerBusy: () -> Bool = { false }
+    @ObservationIgnored private var probes: [(key: String, url: URL)] = []
+    @ObservationIgnored private var probing = false
+
+    /// One at a time, only while nothing plays, newest first; the result fills in the poster's badge.
+    private func probe(_ key: String, _ url: URL) {
+        guard !probes.contains(where: { $0.key == key }) else { return }
+        probes.append((key, url))
+        if probes.count > 60 { probes.removeFirst() }
+        guard !probing else { return }
+        probing = true
+        Task { [weak self] in
+            while let self, let next = self.probes.popLast() {
+                while self.isPlayerBusy() { try? await Task.sleep(for: .seconds(2)) }
+                if let q = await StreamProbe.measure(next.url), q.ok, q.height > 0, var current = self.quick[next.key] {
+                    current.tier = QualityTier.from(width: q.width, height: q.height).rawValue
+                    self.setQuick(next.key, current)
+                }
+                try? await Task.sleep(for: .seconds(1))
+            }
+            self?.probing = false
+        }
     }
 
     private func setQuick(_ key: String, _ q: Quick) {
@@ -678,15 +716,27 @@ final class VODStore {
         s.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
     }
 
-    func searchMovies(_ query: String, limit: Int = 120) -> [Movie] { search(query, allMovies, movieKeys, limit) }
-    func searchSeries(_ query: String, limit: Int = 120) -> [Series] { search(query, allSeries, seriesKeys, limit) }
+    func searchMovies(_ query: String, limit: Int = 120, where keep: (Movie) -> Bool = { _ in true }) -> [Movie] {
+        search(query, allMovies, movieKeys, limit, keep)
+    }
+    func searchSeries(_ query: String, limit: Int = 120, where keep: (Series) -> Bool = { _ in true }) -> [Series] {
+        search(query, allSeries, seriesKeys, limit, keep)
+    }
+
+    /// The collection's language tag ("FR"), or the measured audio language.
+    func language(of m: Movie) -> String? {
+        movieCategories.first { $0.id == m.categoryID }.flatMap { VODBrowser.languageTag($0.name) } ?? quick(m)?.language
+    }
+    func language(of s: Series) -> String? {
+        seriesCategories.first { $0.id == s.categoryID }.flatMap { VODBrowser.languageTag($0.name) } ?? quick(s)?.language
+    }
 
     /// Every word must match; titles starting with the query come first.
-    private func search<T>(_ query: String, _ items: [T], _ keys: [String], _ limit: Int) -> [T] {
+    private func search<T>(_ query: String, _ items: [T], _ keys: [String], _ limit: Int, _ keep: (T) -> Bool) -> [T] {
         let words = VODStore.key(query).split(whereSeparator: \.isWhitespace).map(String.init)
         guard let first = words.first else { return [] }
         var starts: [T] = [], others: [T] = []
-        for (i, key) in keys.enumerated() where words.allSatisfy({ key.contains($0) }) {
+        for (i, key) in keys.enumerated() where words.allSatisfy({ key.contains($0) }) && keep(items[i]) {
             if key.hasPrefix(first) { starts.append(items[i]) } else { others.append(items[i]) }
             if starts.count >= limit { break }
         }

@@ -8,6 +8,9 @@ struct SearchResultsView: View {
     let query: String
     let channels: [Channel]
     let nav: Navigator
+    /// From the toolbar filter: measured quality ("4K" / "1080p" / …) and collection language ("FR" / …).
+    var quality: String? = nil
+    var language: String = ""
 
     @State private var movies: [Movie] = []
     @State private var series: [Series] = []
@@ -45,10 +48,10 @@ struct SearchResultsView: View {
                         }
                     }
 
-                    if !movies.isEmpty {
-                        section("Movies", count: movies.count) {
+                    if !shownMovies.isEmpty {
+                        section("Movies", count: shownMovies.count) {
                             LazyVGrid(columns: posterColumns, spacing: 26) {
-                                ForEach(movies) { m in
+                                ForEach(shownMovies) { m in
                                     NavigationLink(value: m) {
                                         PosterCard(title: m.title, poster: m.poster, caption: m.year ?? "",
                                                    badges: vod.quick(m)?.badges ?? [], detail: vod.categoryLabel(movie: m))
@@ -60,10 +63,10 @@ struct SearchResultsView: View {
                         }
                     }
 
-                    if !series.isEmpty {
-                        section("Series", count: series.count) {
+                    if !shownSeries.isEmpty {
+                        section("Series", count: shownSeries.count) {
                             LazyVGrid(columns: posterColumns, spacing: 26) {
-                                ForEach(series) { s in
+                                ForEach(shownSeries) { s in
                                     NavigationLink(value: s) {
                                         PosterCard(title: s.title, poster: s.cover,
                                                    caption: [s.year, vod.quick(s)?.counts].compactMap { $0 }.joined(separator: " · "),
@@ -82,7 +85,13 @@ struct SearchResultsView: View {
                             Text("Getting the movie and series list ready for search (first time only)…")
                                 .foregroundStyle(.secondary)
                         }
-                    } else if channels.isEmpty && movies.isEmpty && series.isEmpty {
+                    } else if vod.isChecking && quality != nil {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Checking quality: \(vod.checkDone) of \(vod.checkTotal)… matching titles appear as they're confirmed.")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if channels.isEmpty && shownMovies.isEmpty && shownSeries.isEmpty {
                         Text("Nothing matches “\(query)”.").foregroundStyle(.secondary)
                     }
                 }
@@ -93,14 +102,26 @@ struct SearchResultsView: View {
             .navigationDestination(for: Series.self) { SeriesDetailView(series: $0) }
         }
         // Debounced: searching 150k titles on every keystroke would stutter.
-        .task(id: "\(query)|\(vod.allMovies.count)|\(vod.allSeries.count)") {
+        .task(id: "\(query)|\(vod.allMovies.count)|\(vod.allSeries.count)|\(language)") {
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
-            movies = vod.searchMovies(query, limit: 60)
-            series = vod.searchSeries(query, limit: 60)
+            // Language narrows the search itself (by collection), so the limit isn't spent on other languages.
+            let lang = language
+            movies = vod.searchMovies(query, limit: 60) { lang.isEmpty || vod.language(of: $0) == lang }
+            series = vod.searchSeries(query, limit: 60) { lang.isEmpty || vod.language(of: $0) == lang }
+            if quality != nil { checkResults() }
         }
+        .onChange(of: quality) { if quality != nil { checkResults() } }
         .onChange(of: query) { showAllChannels = false }
     }
+
+    /// Quality is only known once measured: check the results that haven't been yet.
+    private func checkResults() {
+        vod.checkAll(movies, series, title: "results")
+    }
+
+    private var shownMovies: [Movie] { quality.map { q in movies.filter { vod.quick($0)?.tier == q } } ?? movies }
+    private var shownSeries: [Series] { quality.map { q in series.filter { vod.quick($0)?.tier == q } } ?? series }
 
     private func section<Content: View>(_ title: String, count: Int, @ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 14) {
