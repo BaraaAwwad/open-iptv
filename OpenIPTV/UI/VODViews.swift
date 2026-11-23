@@ -10,11 +10,36 @@ struct VODBrowser: View {
     let query: String
     @State private var category: String?
     @State private var path = NavigationPath()
+    /// Language filter: narrows the category list to one language's collections. Remembered.
+    @AppStorage("vodLanguage") private var language = ""
+    /// Quality filter: only titles measured at this quality.
+    @State private var quality: String?
 
-    private var categories: [VODCategory] { kind == .movies ? vod.movieCategories : vod.seriesCategories }
+    private var allCategories: [VODCategory] { kind == .movies ? vod.movieCategories : vod.seriesCategories }
+    private var categories: [VODCategory] {
+        language.isEmpty ? allCategories : allCategories.filter { VODBrowser.languageTag($0.name) == language }
+    }
+
+    /// Languages present in the category names, most common first.
+    private var languages: [(tag: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for c in allCategories { if let t = VODBrowser.languageTag(c.name) { counts[t, default: 0] += 1 } }
+        return counts.map { ($0.key, $0.value) }.sorted { $0.count > $1.count }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
+            VStack(spacing: 0) {
+            Picker("Language", selection: $language) {
+                Text("All Languages").tag("")
+                Divider()
+                ForEach(languages, id: \.tag) { l in Text("\(l.tag)  (\(l.count))").tag(l.tag) }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .help("Show only collections in one language")
             List(selection: $category) {
                 ForEach(categories) { c in
                     Text(VODBrowser.label(c.name)).lineLimit(1).tag(c.id)
@@ -22,10 +47,11 @@ struct VODBrowser: View {
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
+            }
             .frame(width: 230)
             .background(Color.primary.opacity(0.03))
             .overlay {
-                if categories.isEmpty {
+                if allCategories.isEmpty {
                     if let e = vod.error { Text(e).font(.callout).foregroundStyle(.secondary).padding() } else { ProgressView() }
                 }
             }
@@ -40,8 +66,13 @@ struct VODBrowser: View {
             await vod.loadCategories()
             if category == nil { category = categories.first?.id }
         }
+        .onChange(of: language) {
+            if !categories.contains(where: { $0.id == category }) { category = categories.first?.id }
+        }
         .onChange(of: category) { _, c in
             path = NavigationPath()
+            quality = nil
+            vod.stopCheck()
             guard let c else { return }
             Task { kind == .movies ? await vod.loadMovies(c) : await vod.loadSeries(c) }
         }
@@ -53,7 +84,8 @@ struct VODBrowser: View {
             switch kind {
             case .movies:
                 if let items = vod.movies[category] {
-                    PosterGrid(title: name, items: filter(items, \.title), key: category) { m in
+                    PosterGrid(title: name, items: byQuality(filter(items, \.title)) { vod.quick($0)?.tier }, key: category,
+                               accessory: AnyView(qualityControl(count: items.count) { vod.checkAll(items, title: name) })) { m in
                         NavigationLink(value: m) {
                             PosterCard(title: m.title, poster: m.poster, caption: caption(m.year, m.rating),
                                        badges: vod.quick(m)?.badges ?? [])
@@ -63,7 +95,8 @@ struct VODBrowser: View {
                 } else { loadingView }
             case .series:
                 if let items = vod.series[category] {
-                    PosterGrid(title: name, items: filter(items, \.title), key: category) { s in
+                    PosterGrid(title: name, items: byQuality(filter(items, \.title)) { vod.quick($0)?.tier }, key: category,
+                               accessory: AnyView(qualityControl(count: items.count) { vod.checkAll(items, title: name) })) { s in
                         NavigationLink(value: s) {
                             PosterCard(title: s.title, poster: s.cover, caption: caption(s.year, s.rating),
                                        badges: vod.quick(s)?.badges ?? [], detail: vod.quick(s)?.counts)
@@ -74,6 +107,34 @@ struct VODBrowser: View {
             }
         } else {
             loadingView
+        }
+    }
+
+    private func byQuality<T>(_ items: [T], _ tier: (T) -> String?) -> [T] {
+        guard let quality else { return items }
+        return items.filter { tier($0) == quality }
+    }
+
+    /// Quality filter + the background check that measures the category.
+    private func qualityControl(count: Int, check: @escaping () -> Void) -> some View {
+        HStack(spacing: 12) {
+            if vod.isChecking {
+                ProgressView(value: Double(vod.checkDone), total: Double(max(vod.checkTotal, 1)))
+                    .frame(width: 80).controlSize(.small)
+                Text("Checking \(vod.checkDone) of \(vod.checkTotal)").font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                Button("Stop") { vod.stopCheck() }
+            }
+            Picker("Quality", selection: Binding(get: { quality ?? "" }, set: { value in
+                quality = value.isEmpty ? nil : value
+                if quality != nil, !vod.isChecking { check() }
+            })) {
+                Text("All Qualities").tag("")
+                Divider()
+                ForEach(["4K", "1080p", "720p", "SD"], id: \.self) { Text($0).tag($0) }
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+            .help("Show only titles measured at this quality. Choosing one checks the whole category in the background (\(count) titles).")
         }
     }
 
@@ -101,6 +162,14 @@ struct VODBrowser: View {
         [year, rating.map { String(format: "★ %.1f", $0) }].compactMap { $0 }.joined(separator: "  ·  ")
     }
 
+    /// The language tag of a category name: "|VOD-FR| COMEDIE" → "FR", "MULTI · Netflix" → "MULTI".
+    static func languageTag(_ raw: String) -> String? {
+        let label = VODBrowser.label(raw)
+        guard let dot = label.range(of: " · ") else { return nil }
+        let tag = String(label[..<dot.lowerBound]).uppercased()
+        return tag.count <= 6 && tag.allSatisfy({ $0.isLetter || $0 == "-" }) ? tag : nil
+    }
+
     /// "|VOD-FR| COMEDIE DRAMATIQUE" → "FR · Comedie Dramatique"
     static func label(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
@@ -119,6 +188,7 @@ struct PosterGrid<Item: Identifiable, Cell: View>: View {
     let title: String
     let items: [Item]
     let key: String
+    var accessory: AnyView = AnyView(EmptyView())
     @ViewBuilder let cell: (Item) -> Cell
 
     var body: some View {
@@ -127,9 +197,11 @@ struct PosterGrid<Item: Identifiable, Cell: View>: View {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(title).font(.system(size: 34, weight: .bold)).lineLimit(1)
                     Text("\(items.count)").font(.title3).foregroundStyle(.tertiary)
+                    Spacer(minLength: 12)
+                    accessory
                 }
                 if items.isEmpty {
-                    Text("Nothing here.").foregroundStyle(.secondary)
+                    Text("Nothing here yet. If a quality filter is on, titles appear as they're checked.").foregroundStyle(.secondary)
                 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: 24, alignment: .top)], spacing: 30) {
                     ForEach(items) { cell($0).buttonStyle(.plain) }

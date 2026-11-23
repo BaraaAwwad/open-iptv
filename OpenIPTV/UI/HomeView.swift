@@ -26,7 +26,7 @@ struct HomeView: View {
                         .padding(.horizontal, 36)
                     }
                     if !vod.recents.isEmpty {
-                        ContinueWatchingRow()
+                        ContinueWatchingRow(selection: $selection)
                     }
                     if !recents.isEmpty {
                         shelf("Recent Channels", recents, .recents)
@@ -36,30 +36,24 @@ struct HomeView: View {
                     }
                     let movies = vod.latestMovies()
                     if !movies.isEmpty {
-                        PosterRow(title: "Latest Movies", target: .movies, selection: $selection) {
-                            ForEach(movies) { m in
-                                NavigationLink(value: m) {
-                                    PosterCard(title: m.title, poster: m.poster, caption: m.year ?? "",
-                                               badges: vod.quick(m)?.badges ?? [], detail: vod.categoryLabel(movie: m))
-                                        .frame(width: 150)
-                                }
-                                .task { vod.enrich(m) }
-                                .buttonStyle(.plain)
+                        PagedRow(title: "Latest Movies", target: .movies, selection: $selection, items: movies, itemWidth: 150) { m in
+                            NavigationLink(value: m) {
+                                PosterCard(title: m.title, poster: m.poster, caption: m.year ?? "",
+                                           badges: vod.quick(m)?.badges ?? [], detail: vod.categoryLabel(movie: m))
                             }
+                            .task { vod.enrich(m) }
+                            .buttonStyle(.plain)
                         }
                     }
                     let series = vod.latestSeries()
                     if !series.isEmpty {
-                        PosterRow(title: "Latest Series", target: .series, selection: $selection) {
-                            ForEach(series) { s in
-                                NavigationLink(value: s) {
-                                    PosterCard(title: s.title, poster: s.cover, caption: s.year ?? "",
-                                               badges: vod.quick(s)?.badges ?? [], detail: vod.categoryLabel(series: s))
-                                        .frame(width: 150)
-                                }
-                                .task { vod.enrich(s) }
-                                .buttonStyle(.plain)
+                        PagedRow(title: "Latest Series", target: .series, selection: $selection, items: series, itemWidth: 150) { s in
+                            NavigationLink(value: s) {
+                                PosterCard(title: s.title, poster: s.cover, caption: s.year ?? "",
+                                           badges: vod.quick(s)?.badges ?? [], detail: vod.categoryLabel(series: s))
                             }
+                            .task { vod.enrich(s) }
+                            .buttonStyle(.plain)
                         }
                     }
                     if !library.groups.isEmpty {
@@ -90,32 +84,84 @@ struct HomeView: View {
     }
 }
 
-/// A titled horizontal row of posters.
-struct PosterRow<Content: View>: View {
+/// A titled horizontal row with ‹ › page buttons (not everyone knows Shift-scroll).
+/// Pages with its own index + ScrollViewReader (no scroll-position binding, which can loop layout).
+struct PagedRow<Item: Identifiable, Cell: View>: View {
     let title: String
-    let target: SidebarItem?
+    var target: SidebarItem? = nil
     @Binding var selection: SidebarItem?
-    @ViewBuilder let content: () -> Content
+    let items: [Item]
+    let itemWidth: CGFloat
+    var spacing: CGFloat = 22
+    @ViewBuilder let cell: (Item) -> Cell
+
+    @State private var pageStart = 0
+    @State private var pageSize = 4
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Button { if let target { selection = target } } label: {
-                HStack(spacing: 4) {
-                    Text(title).font(.title2.weight(.bold))
-                    if target != nil {
-                        Image(systemName: "chevron.right").font(.title3.weight(.bold)).foregroundStyle(.secondary)
+            HStack {
+                Button { if let target { selection = target } } label: {
+                    HStack(spacing: 4) {
+                        Text(title).font(.title2.weight(.bold))
+                        if target != nil {
+                            Image(systemName: "chevron.right").font(.title3.weight(.bold)).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(target == nil)
+                Spacer()
+                if items.count > pageSize {
+                    HStack(spacing: 8) {
+                        PageButton(symbol: "chevron.left", enabled: pageStart > 0) { page(-1) }
+                        PageButton(symbol: "chevron.right", enabled: pageStart + pageSize < items.count) { page(1) }
                     }
                 }
             }
-            .buttonStyle(.plain)
             .padding(.horizontal, 36)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 20) { content() }
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: spacing) {
+                        ForEach(items) { item in
+                            cell(item).frame(width: itemWidth).id(item.id)
+                        }
+                    }
                     .padding(.vertical, 6)
+                }
+                .contentMargins(.horizontal, 36, for: .scrollContent)
+                .scrollClipDisabled()
+                .onChange(of: pageStart) { _, start in
+                    guard items.indices.contains(start) else { return }
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { proxy.scrollTo(items[start].id, anchor: .leading) }
+                }
             }
-            .contentMargins(.horizontal, 36, for: .scrollContent)
-            .scrollClipDisabled()
         }
+        .onGeometryChange(for: Int.self, of: { max(1, Int(($0.size.width - 72 + spacing) / (itemWidth + spacing))) }) { pageSize = $0 }
+        .onChange(of: items.count) { pageStart = 0 }
+    }
+
+    private func page(_ direction: Int) {
+        pageStart = min(max(pageStart + direction * pageSize, 0), max(0, items.count - pageSize))
+    }
+}
+
+struct PageButton: View {
+    let symbol: String
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .bold))
+                .frame(width: 28, height: 28)
+                .background(Color.primary.opacity(0.08), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressScale())
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.35)
     }
 }
 
@@ -123,28 +169,19 @@ struct PosterRow<Content: View>: View {
 struct ContinueWatchingRow: View {
     @Environment(VODStore.self) private var vod
     @Environment(PlayerModel.self) private var player
+    @Binding var selection: SidebarItem?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Continue Watching").font(.title2.weight(.bold)).padding(.horizontal, 36)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 22) {
-                    ForEach(vod.recents) { r in
-                        ContinueCard(recent: r) {
-                            if let item = vod.item(for: r) { player.playVOD(item) }
-                        }
-                        .contextMenu {
-                            Button("Resume") { if let item = vod.item(for: r) { player.playVOD(item) } }
-                            Button("Remove from Continue Watching", role: .destructive) {
-                                withAnimation(.easeOut(duration: 0.2)) { vod.removeRecent(r) }
-                            }
-                        }
-                    }
-                }
-                .padding(.vertical, 6)
+        PagedRow(title: "Continue Watching", selection: $selection, items: vod.recents, itemWidth: 280) { r in
+            ContinueCard(recent: r) {
+                if let item = vod.item(for: r) { player.playVOD(item) }
             }
-            .contentMargins(.horizontal, 36, for: .scrollContent)
-            .scrollClipDisabled()
+            .contextMenu {
+                Button("Resume") { if let item = vod.item(for: r) { player.playVOD(item) } }
+                Button("Remove from Continue Watching", role: .destructive) {
+                    withAnimation(.easeOut(duration: 0.2)) { vod.removeRecent(r) }
+                }
+            }
         }
     }
 }

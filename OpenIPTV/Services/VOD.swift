@@ -477,6 +477,52 @@ final class VODStore {
     @ObservationIgnored private var running = 0
     @ObservationIgnored private var quickSave: Task<Void, Never>?
 
+    // MARK: Check a whole category (for the Quality filter)
+
+    private(set) var checkTotal = 0
+    private(set) var checkDone = 0
+    private(set) var checkTitle = ""
+    @ObservationIgnored private var checkTask: Task<Void, Never>?
+    var isChecking: Bool { checkTask != nil }
+
+    func checkAll(_ items: [Movie], title: String) {
+        runCheck(items.filter { quick($0) == nil }.map { m in { [weak self] in _ = await self?.info(m) } }, title: title)
+    }
+
+    func checkAll(_ items: [Series], title: String) {
+        runCheck(items.filter { quick($0) == nil }.map { s in { [weak self] in _ = await self?.info(s) } }, title: title)
+    }
+
+    func stopCheck() {
+        checkTask?.cancel()
+        checkTask = nil
+    }
+
+    /// Four at a time; the provider's API calls don't use the stream connection.
+    private func runCheck(_ jobs: [() async -> Void], title: String) {
+        stopCheck()
+        guard !jobs.isEmpty else { return }
+        checkTitle = title
+        checkTotal = jobs.count
+        checkDone = 0
+        checkTask = Task { [weak self] in
+            await withTaskGroup(of: Void.self) { group in
+                var next = 0
+                func add() {
+                    guard next < jobs.count, !Task.isCancelled else { return }
+                    let job = jobs[next]; next += 1
+                    group.addTask { await job() }
+                }
+                for _ in 0..<4 { add() }
+                while await group.next() != nil {
+                    await MainActor.run { self?.checkDone += 1 }
+                    add()
+                }
+            }
+            await MainActor.run { self?.checkTask = nil }
+        }
+    }
+
     func quick(_ m: Movie) -> Quick? { quick["m\(m.id)"] }
     func quick(_ s: Series) -> Quick? { quick["s\(s.id)"] }
 
